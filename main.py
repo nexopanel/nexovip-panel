@@ -962,10 +962,12 @@ def link_for_variant(link: dict, uid: str, auth: str, address: str = None, inclu
 def links_for_all_variants(link: dict, uid: str, address: str = None) -> list[str]:
     """برای هر auth فعال روی این لینک، یک share-link می‌سازه (ممکنه ۱ یا ۲ تا خروجی بده)."""
     out = []
+    first = True
     for auth in AUTH_TYPES:
-        share_link = link_for_variant(link, uid, auth, address=address)
+        share_link = link_for_variant(link, uid, auth, address=address, include_usage=first)
         if share_link:
             out.append(share_link)
+            first = False
     return out
 
 def uptime() -> str:
