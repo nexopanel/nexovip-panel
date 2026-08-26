@@ -16,6 +16,7 @@
 import { CopyButton } from "@/components/nexo-bits";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
 import {
   Dialog,
   DialogContent,
@@ -23,14 +24,19 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { ScrollArea } from "@/components/ui/scroll-area";
+import { Input } from "@/components/ui/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Input } from "@/components/ui/input";
 import {
   AUTH_TYPES,
   type LinkRow,
 } from "@/lib/luffy/core";
 import { getDb } from "@/lib/luffy/db";
-import { buildServerConfig, type GeneratedServerConfig } from "@/lib/luffy/serverconfig";
+import {
+  buildServerConfig,
+  buildInstallScript,
+  type GeneratedServerConfig,
+} from "@/lib/luffy/serverconfig";
 import { useI18n } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 import { motion } from "framer-motion";
@@ -44,6 +50,7 @@ import {
   Loader2,
   RadioTower,
   Server,
+  Wand2,
   XCircle,
 } from "lucide-react";
 import { useState } from "react";
@@ -127,6 +134,10 @@ export function GatewayTools({ domain }: { domain: string }) {
   const [skipped, setSkipped] = useState(false);
   const [srvOpen, setSrvOpen] = useState(false);
   const [gen, setGen] = useState<GeneratedServerConfig | null>(null);
+  const [instDomain, setInstDomain] = useState(domain);
+  const [instScript, setInstScript] = useState("");
+  const [instDomain, setInstDomain] = useState(domain);
+  const [instScript, setInstScript] = useState("");
 
   const running = phase === "https" || phase === "tunnel";
 
@@ -151,6 +162,8 @@ export function GatewayTools({ domain }: { domain: string }) {
   const openServerConfig = () => {
     const built = buildServerConfig(getDb().links, domain);
     setGen(built);
+    setInstDomain(domain);
+    setInstScript("");
     setSrvOpen(true);
   };
 
@@ -341,6 +354,9 @@ export function GatewayTools({ domain }: { domain: string }) {
                 <TabsTrigger value="caddy" className="rounded-lg text-xs">
                   Caddy
                 </TabsTrigger>
+                <TabsTrigger value="install" className="gap-1.5 rounded-lg text-xs">
+                  <Wand2 className="size-3.5" /> {t("tabInstall")}
+                </TabsTrigger>
               </TabsList>
 
               <TabsContent value="xray" className="mt-3 space-y-3">
@@ -382,6 +398,59 @@ export function GatewayTools({ domain }: { domain: string }) {
                     {gen.caddy}
                   </pre>
                 </ScrollArea>
+              </TabsContent>
+
+              <TabsContent value="install" className="mt-3 space-y-3">
+                <div className="flex gap-2">
+                  <Input
+                    value={instDomain}
+                    onChange={(e) => setInstDomain(e.target.value)}
+                    placeholder={t("gwPlaceholder")}
+                    dir="ltr"
+                    className="h-9 rounded-lg border-border/80 bg-background/50 font-mono text-xs"
+                  />
+                  <Button
+                    size="sm"
+                    onClick={() => setInstScript(buildInstallScript(instDomain, gen))}
+                    disabled={!instDomain.trim()}
+                    className="h-9 shrink-0 gap-1.5 rounded-lg bg-gradient-to-r from-[#b91c2e] to-[#ef2a3a] px-3 font-bold text-white shadow-md shadow-red-950/40 hover:brightness-110"
+                  >
+                    <Wand2 className="size-3.5" />
+                    {t("instGenerate")}
+                  </Button>
+                </div>
+
+                {instScript ? (
+                  <>
+                    <SnippetToolbar
+                      onCopy={<CopyButton value={instScript} label={t("copy")} />}
+                      onDownload={() =>
+                        download("nexovip-install.sh", instScript, "text/x-shellscript")
+                      }
+                      meta="nexovip-install.sh · Ubuntu 20.04+ / Debian 11+ · root"
+                    />
+                    <ScrollArea className="h-44 rounded-xl border border-border/70 bg-background/60">
+                      <pre
+                        dir="ltr"
+                        className="p-4 font-mono text-[11px] leading-relaxed text-muted-foreground"
+                      >
+                        {instScript}
+                      </pre>
+                    </ScrollArea>
+                    <div className="space-y-1.5 rounded-xl border border-border/60 bg-background/40 p-3 text-xs leading-relaxed text-muted-foreground">
+                      <p className="whitespace-pre-line">{t("instHint")}</p>
+                      <code dir="ltr" className="block break-all font-mono text-primary">
+                        scp nexovip-install.sh root@SERVER_IP:/root/ &amp;&amp; ssh root@SERVER_IP
+                        &quot;bash /root/nexovip-install.sh&quot;
+                      </code>
+                      <p className="opacity-80">{t("instDone")}</p>
+                    </div>
+                  </>
+                ) : (
+                  <p className="py-6 text-center text-sm text-muted-foreground">
+                    {t("instPrompt")}
+                  </p>
+                )}
               </TabsContent>
             </Tabs>
           )}

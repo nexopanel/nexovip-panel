@@ -14,10 +14,6 @@
  *   - WS inbounds accept ANY path (clients dial /ws/{auth}/{uuid}?ed=2048);
  *     the /ws/vless/… vs /ws/trojan/… prefix routes at the proxy.
  *   - XHTTP inbounds serve both packet-up and stream-up modes.
- *
- * Client URIs keep host/sni = REAL domain; only the dial address may be a
- * clean IP. Swapping them breaks SNI/Host routing → same "TCP OK, dead
- * tunnel" symptom.
  */
 
 import { AUTH_TYPES, TRANSPORTS, type AuthType, type LinkRow, type Transport } from "./core";
@@ -126,7 +122,7 @@ export function buildServerConfig(links: LinkRow[], domain: string): GeneratedSe
   const wsHeaders = [
     "    proxy_http_version 1.1;",
     "    proxy_set_header Upgrade $http_upgrade;",
-    "    proxy_set_header Connection \"upgrade\";",
+    '    proxy_set_header Connection "upgrade";',
     "    proxy_set_header Host $host;",
     "    proxy_set_header X-Real-IP $remote_addr;",
     "    proxy_read_timeout 300s;",
@@ -201,3 +197,93 @@ export function buildServerConfig(links: LinkRow[], domain: string): GeneratedSe
 }
 
 export const SUPPORTED_TRANSPORTS = TRANSPORTS;
+
+// ── One-command gateway installer ────────────────────────────────────
+/**
+ * Self-contained bash installer that turns ANY fresh Ubuntu 20.04+ /
+ * Debian 11+ VPS into this panel's gateway in one command:
+ *
+ *     sudo bash nexovip-install.sh
+ *
+ * It embeds the user's exact Xray JSON and Caddyfile (domain baked in),
+ * installs Xray-core + Caddy, registers systemd services, opens the
+ * firewall and health-checks both daemons.
+ */
+export function buildInstallScript(domain: string, gen: GeneratedServerConfig): string {
+  if (gen.isEmpty) return "";
+  const d = domain.trim().toLowerCase() || "vpn.example.com";
+
+  const caddyBody = [
+    `${d} {`,
+    ...gen.routes.map(
+      (r) => `  handle ${r.pathPrefix}* {\n    reverse_proxy 127.0.0.1:${r.port}\n  }`,
+    ),
+    `  handle {`,
+    `    respond "NexoVIP gateway online" 200`,
+    `  }`,
+    `}`,
+  ].join("\n");
+
+  const json = JSON.stringify(gen.xray, null, 2);
+
+  return [
+    `#!/usr/bin/env bash`,
+    `# ============================================================`,
+    `#  NexoVIP gateway — one-command installer (Xray + Caddy)`,
+    `#  Target: fresh Ubuntu 20.04+ / Debian 11+. Run as root:`,
+    `#      sudo bash nexovip-install.sh`,
+    `#  Gateway domain baked into this build: ${d}`,
+    `# ============================================================`,
+    `set -euo pipefail`,
+    ``,
+    `if [ "$(id -u)" -ne 0 ]; then`,
+    `  echo "✖ Run as root:  sudo bash $0"; exit 1`,
+    `fi`,
+    `command -v curl >/dev/null 2>&1 || { apt-get update -y && apt-get install -y curl; }`,
+    ``,
+    `echo "==> [1/5] Installing Xray-core"`,
+    `bash -c "$(curl -fsSL https://github.com/XTLS/Xray-install/raw/main/install-release.sh)" @ install`,
+    ``,
+    `echo "==> [2/5] Writing Xray config (${gen.routes.length} inbounds · ${gen.clientCount} clients)"`,
+    `mkdir -p /usr/local/etc/xray`,
+    `cat > /usr/local/etc/xray/config.json <<'NEXO_JSON'`,
+    json,
+    `NEXO_JSON`,
+    ``,
+    `echo "==> [3/5] Installing Caddy web server (automatic HTTPS)"`,
+    `if ! command -v caddy >/dev/null 2>&1; then`,
+    `  apt-get update -y`,
+    `  apt-get install -y debian-keyring debian-archive-keyring apt-transport-https ca-certificates curl gnupg`,
+    `  curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' | gpg --dearmor --yes -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg`,
+    `  curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' | tee /etc/apt/sources.list.d/caddy-stable.list >/dev/null`,
+    `  apt-get update -y && apt-get install -y caddy`,
+    `fi`,
+    ``,
+    `echo "==> [4/5] Writing Caddyfile for ${d}"`,
+    `cat > /etc/caddy/Caddyfile <<'NEXO_CADDY'`,
+    caddyBody,
+    `NEXO_CADDY`,
+    ``,
+    `echo "==> [5/5] Starting services + firewall"`,
+    `systemctl enable --now xray caddy`,
+    `systemctl restart xray caddy`,
+    `if command -v ufw >/dev/null 2>&1; then`,
+    `  ufw allow 80/tcp  >/dev/null 2>&1 || true`,
+    `  ufw allow 443/tcp >/dev/null 2>&1 || true`,
+    `fi`,
+    ``,
+    `sleep 2`,
+    `echo`,
+    `if systemctl is-active --quiet xray; then echo "✔ xray: running"; else echo "✖ xray failed:"; journalctl -u xray -n 20 --no-pager; fi`,
+    `if systemctl is-active --quiet caddy; then echo "✔ caddy: running"; else echo "✖ caddy failed:"; journalctl -u caddy -n 20 --no-pager; fi`,
+    ``,
+    `cat <<'NEXO_DONE'`,
+    ``,
+    `============================================================`,
+    ` ✅ Gateway deployed!`,
+    ` Next: open NexoVIP → Clean IPs → set "${d}" as the`,
+    ` Gateway domain, save, then press "Run diagnostics".`,
+    `============================================================`,
+    `NEXO_DONE`,
+  ].join("\n") + "\n";
+}

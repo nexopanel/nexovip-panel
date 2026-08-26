@@ -246,6 +246,15 @@ const en = {
     "One inbound per protocol × transport aggregates every active config as a client (VLESS id / Trojan password = UUID).",
   srvBulletEdge:
     "TLS terminates at your edge (NGINX/Caddy/platform); Xray listens plaintext on internal ports and paths route by prefix.",
+
+  // Auto-install tab
+  tabInstall: "Auto-install",
+  instGenerate: "Build script",
+  instPrompt: "Enter your server domain above, then build the one-file installer.",
+  instHint:
+    "① Point an A record of the domain to the VPS IP\n② Upload the file to the server and run it:",
+  instDone:
+    "When it finishes, set the same domain as Gateway in Clean IPs, save, and re-run diagnostics.",
 };
 
 export type DictKey = keyof typeof en;
@@ -467,6 +476,14 @@ const fa: Record<DictKey, string> = {
     "برای هر ترکیب پروتکل × ترنسپورت یک اینباند ساخته می‌شود و همه کانفیگ‌های فعال به‌عنوان کلاینت در آن جمع می‌شوند (شناسه VLESS / رمز تروجان = UUID).",
   srvBulletEdge:
     "TLS در لبه (NGINX/Caddy/پلتفرم) خاتمه می‌یابد؛ Xray روی پورت‌های داخلی بدون رمز گوش می‌دهد و مسیرها با پیشوند روت می‌شوند.",
+
+  tabInstall: "نصب خودکار",
+  instGenerate: "ساخت اسکریپت",
+  instPrompt: "دامنه سرور را بالا وارد کن و نصب‌کننده تک‌فایلی را بساز.",
+  instHint:
+    "① یک رکورد A از دامنه را به آی‌پی وی‌پی‌اس وصل کن\n② فایل را روی سرور آپلود کن و اجرایش کن:",
+  instDone:
+    "پس از پایان، همین دامنه را در تب «آی‌پی تمیز» به‌عنوان Gateway ذخیره کن و دوباره عیب‌یابی بگیر.",
 };
 
 interface I18nContextValue {
