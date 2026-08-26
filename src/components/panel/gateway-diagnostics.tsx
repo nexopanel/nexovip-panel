@@ -16,7 +16,6 @@
 import { CopyButton } from "@/components/nexo-bits";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
 import {
   Dialog,
   DialogContent,
@@ -25,12 +24,9 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Input } from "@/components/ui/input";
-import {
-  AUTH_TYPES,
-  type LinkRow,
-} from "@/lib/luffy/core";
+import { AUTH_TYPES } from "@/lib/luffy/core";
 import { getDb } from "@/lib/luffy/db";
 import {
   buildServerConfig,
@@ -134,8 +130,6 @@ export function GatewayTools({ domain }: { domain: string }) {
   const [skipped, setSkipped] = useState(false);
   const [srvOpen, setSrvOpen] = useState(false);
   const [gen, setGen] = useState<GeneratedServerConfig | null>(null);
-  const [instDomain, setInstDomain] = useState(domain);
-  const [instScript, setInstScript] = useState("");
   const [instDomain, setInstDomain] = useState(domain);
   const [instScript, setInstScript] = useState("");
 
