@@ -2166,12 +2166,12 @@ def generate_landing_page(link: dict, uid: str, addresses: list[str]) -> str:
     <style>
         *{{margin:0;padding:0;box-sizing:border-box}}
         :root{{
-            --gold:#FFD700;--gold2:#FFC200;--gold3:#8f1020;
-            --gold-dim:rgba(239,42,58,0.1);--gold-glow:0 0 20px rgba(255,215,0,0.3);
+            --gold:#ef2a3a;--gold2:#ff5a63;--gold3:#8f1020;
+            --gold-dim:rgba(239,42,58,0.1);--gold-glow:0 0 20px rgba(239,42,58,0.3);
             --bg:#0a0104;--bg2:#100308;--bg3:#180510;
             --surface:rgba(20,5,10,0.95);--surface2:rgba(30,8,15,0.9);
-            --border:rgba(255,215,0,0.12);--border2:rgba(255,215,0,0.25);
-            --text:rgba(255,255,255,0.92);--text2:rgba(255,215,0,0.7);--text3:rgba(255,255,255,0.4);
+            --border:rgba(239,42,58,0.12);--border2:rgba(239,42,58,0.25);
+            --text:rgba(255,255,255,0.92);--text2:rgba(239,42,58,0.7);--text3:rgba(255,255,255,0.4);
             --green:#4ade80;--red:#f87171;--yellow:#fbbf24;
         }}
         html,body{{height:100%;background:var(--bg);font-family:'Inter',sans-serif;color:var(--text)}}
@@ -2179,22 +2179,22 @@ def generate_landing_page(link: dict, uid: str, addresses: list[str]) -> str:
 
         /* Animated background */
         .bg-glow{{position:fixed;inset:0;z-index:0;pointer-events:none;
-            background:radial-gradient(ellipse 60% 40% at 50% -5%,rgba(255,215,0,0.08),transparent 60%),
-                       radial-gradient(ellipse 40% 30% at 80% 80%,rgba(255,215,0,0.05),transparent 50%);}}
+            background:radial-gradient(ellipse 60% 40% at 50% -5%,rgba(239,42,58,0.08),transparent 60%),
+                       radial-gradient(ellipse 40% 30% at 80% 80%,rgba(239,42,58,0.05),transparent 50%);}}
         .grid-bg{{position:fixed;inset:0;z-index:0;pointer-events:none;
-            background-image:linear-gradient(rgba(255,215,0,0.03) 1px,transparent 1px),
-                             linear-gradient(90deg,rgba(255,215,0,0.03) 1px,transparent 1px);
+            background-image:linear-gradient(rgba(239,42,58,0.03) 1px,transparent 1px),
+                             linear-gradient(90deg,rgba(239,42,58,0.03) 1px,transparent 1px);
             background-size:48px 48px;}}
         /* Shooting stars */
         .shooting-stars{{position:fixed;inset:0;z-index:0;pointer-events:none;overflow:hidden}}
         .shooting-stars .star{{position:absolute;width:110px;height:1px;
-            background:linear-gradient(90deg,transparent,rgba(255,215,0,0.55));
-            filter:drop-shadow(0 0 4px rgba(255,215,0,0.35));
+            background:linear-gradient(90deg,transparent,rgba(239,42,58,0.55));
+            filter:drop-shadow(0 0 4px rgba(239,42,58,0.35));
             opacity:0;transform:translate3d(0,0,0) rotate(18deg);
             animation:shoot 7s linear infinite}}
         .shooting-stars .star::after{{content:"";position:absolute;right:0;top:-1px;
             width:3px;height:3px;border-radius:50%;background:var(--gold);
-            box-shadow:0 0 6px 1px rgba(255,215,0,0.7)}}
+            box-shadow:0 0 6px 1px rgba(239,42,58,0.7)}}
         .shooting-stars .star:nth-child(1){{top:8%;left:66%;animation-delay:0s}}
         .shooting-stars .star:nth-child(2){{top:24%;left:84%;animation-delay:2.6s;animation-duration:8s}}
         .shooting-stars .star:nth-child(3){{top:42%;left:58%;animation-delay:5.2s;animation-duration:6.5s}}
@@ -2232,10 +2232,10 @@ def generate_landing_page(link: dict, uid: str, addresses: list[str]) -> str:
         /* Usage ring card */
         .ring-card{{background:var(--surface2);border:1px solid var(--border);border-radius:20px;
             padding:28px 24px;margin-bottom:14px;text-align:center;
-            box-shadow:0 4px 24px rgba(0,0,0,0.4),inset 0 1px 0 rgba(255,215,0,0.08)}}
+            box-shadow:0 4px 24px rgba(0,0,0,0.4),inset 0 1px 0 rgba(239,42,58,0.08)}}
         .ring-wrap{{position:relative;width:160px;height:160px;margin:0 auto 20px}}
         .ring-svg{{width:160px;height:160px;transform:rotate(-90deg)}}
-        .ring-bg{{fill:none;stroke:rgba(255,215,0,0.08);stroke-width:10}}
+        .ring-bg{{fill:none;stroke:rgba(239,42,58,0.08);stroke-width:10}}
         .ring-fill{{fill:none;stroke-width:10;stroke-linecap:round;
             stroke-dasharray:440;stroke-dashoffset:{440 - (440 * min(pct,100)/100):.1f};
             stroke:url(#ringGrad);filter:drop-shadow(0 0 8px {ring_color1});
@@ -2250,7 +2250,7 @@ def generate_landing_page(link: dict, uid: str, addresses: list[str]) -> str:
         .usage-sub{{font-size:11px;color:var(--text3)}}
 
         .info-row{{display:flex;gap:12px;margin-top:18px}}
-        .info-box{{flex:1;background:rgba(255,215,0,0.05);border:1px solid rgba(255,215,0,0.1);
+        .info-box{{flex:1;background:rgba(239,42,58,0.05);border:1px solid rgba(239,42,58,0.1);
             border-radius:10px;padding:10px 12px;text-align:left}}
         .info-box-label{{font-size:9px;font-weight:700;color:var(--text3);letter-spacing:1.5px;text-transform:uppercase;margin-bottom:4px}}
         .info-box-val{{font-size:13px;font-weight:700}}
@@ -2264,19 +2264,19 @@ def generate_landing_page(link: dict, uid: str, addresses: list[str]) -> str:
             padding:24px;margin-bottom:14px;text-align:center;
             box-shadow:0 4px 24px rgba(0,0,0,0.4)}}
         .qr-wrap{{background:#fff;border-radius:12px;padding:12px;display:inline-block;
-            box-shadow:0 0 24px rgba(255,215,0,0.2);margin-bottom:14px}}
+            box-shadow:0 0 24px rgba(239,42,58,0.2);margin-bottom:14px}}
         .qr-wrap img{{width:180px;height:180px;display:block;border-radius:4px}}
         .qr-label{{font-size:9px;letter-spacing:2px;color:var(--text3);text-transform:uppercase;margin-bottom:4px}}
         .sub-link-display{{font-size:11px;color:var(--gold);font-weight:600;
             background:var(--gold-dim);border:1px solid var(--border);border-radius:8px;
             padding:8px 12px;word-break:break-all;cursor:pointer;transition:all .2s}}
-        .sub-link-display:hover{{background:rgba(255,215,0,0.15);border-color:var(--border2)}}
+        .sub-link-display:hover{{background:rgba(239,42,58,0.15);border-color:var(--border2)}}
         .copy-sub-btn{{display:flex;align-items:center;justify-content:center;gap:8px;width:100%;
             padding:12px;border-radius:10px;margin-top:10px;cursor:pointer;border:none;font-family:inherit;
             font-size:14px;font-weight:700;
             background:linear-gradient(135deg,var(--gold),var(--gold2));color:#000;
-            box-shadow:0 0 20px rgba(255,215,0,0.25);transition:all .2s}}
-        .copy-sub-btn:hover{{filter:brightness(1.1);box-shadow:0 0 30px rgba(255,215,0,0.4)}}
+            box-shadow:0 0 20px rgba(239,42,58,0.25);transition:all .2s}}
+        .copy-sub-btn:hover{{filter:brightness(1.1);box-shadow:0 0 30px rgba(239,42,58,0.4)}}
 
         /* Platform chips */
         .section-label{{font-size:9px;font-weight:800;letter-spacing:2px;color:var(--text3);
@@ -2292,7 +2292,7 @@ def generate_landing_page(link: dict, uid: str, addresses: list[str]) -> str:
         .app-card{{background:var(--surface2);border:1px solid var(--border);border-radius:14px;
             padding:14px;cursor:pointer;transition:all .2s;text-decoration:none;display:block}}
         .app-card:hover{{border-color:var(--border2);background:rgba(13,22,38,0.98);
-            box-shadow:0 0 16px rgba(255,215,0,0.1);transform:translateY(-2px)}}
+            box-shadow:0 0 16px rgba(239,42,58,0.1);transform:translateY(-2px)}}
         .app-icon{{width:36px;height:36px;border-radius:8px;margin-bottom:8px;
             display:flex;align-items:center;justify-content:center;font-size:20px}}
         .app-name{{font-size:13px;font-weight:700;color:var(--text);margin-bottom:2px}}
@@ -2306,7 +2306,7 @@ def generate_landing_page(link: dict, uid: str, addresses: list[str]) -> str:
         .configs-count{{font-size:10px;color:var(--text3);background:var(--gold-dim);
             border:1px solid var(--border);border-radius:6px;padding:2px 8px}}
         .config-item{{display:flex;align-items:center;justify-content:space-between;
-            background:rgba(255,215,0,0.04);border:1px solid rgba(255,215,0,0.08);
+            background:rgba(239,42,58,0.04);border:1px solid rgba(239,42,58,0.08);
             border-radius:10px;padding:11px 12px;margin-bottom:8px;gap:8px}}
         .config-icon{{width:32px;height:32px;border-radius:8px;background:var(--gold-dim);
             display:flex;align-items:center;justify-content:center;flex-shrink:0;font-size:14px}}
@@ -2316,10 +2316,10 @@ def generate_landing_page(link: dict, uid: str, addresses: list[str]) -> str:
         .config-type{{font-size:10px;color:var(--text3);margin-top:1px}}
         .ping-badge{{margin-left:8px;font-weight:700}}
         .config-actions{{display:flex;gap:5px;flex-shrink:0}}
-        .btn-copy{{padding:5px 10px;border-radius:7px;border:1px solid rgba(255,215,0,0.2);
+        .btn-copy{{padding:5px 10px;border-radius:7px;border:1px solid rgba(239,42,58,0.2);
             background:var(--gold-dim);color:var(--gold);font-size:10.5px;font-weight:700;
             cursor:pointer;transition:all .2s;font-family:inherit}}
-        .btn-copy:hover{{background:rgba(255,215,0,0.2)}}
+        .btn-copy:hover{{background:rgba(239,42,58,0.2)}}
         .btn-qr{{padding:5px 10px;border-radius:7px;border:1px solid rgba(167,139,250,0.2);
             background:rgba(167,139,250,0.08);color:#a78bfa;font-size:10.5px;font-weight:700;
             cursor:pointer;transition:all .2s;font-family:inherit}}
@@ -2374,10 +2374,10 @@ def generate_landing_page(link: dict, uid: str, addresses: list[str]) -> str:
     <div class="header">
         <div class="header-logo">
             <svg width="28" height="24" viewBox="0 0 84 68" fill="none">
-                <ellipse cx="42" cy="52" rx="40" ry="11" fill="#C8900A" opacity=".85"/>
-                <ellipse cx="42" cy="52" rx="40" ry="11" fill="none" stroke="#FFD700" stroke-width="1.4" opacity=".6"/>
-                <path d="M19 50 Q21 22 42 17 Q63 22 65 50" fill="#2a0a10" stroke="#FFD700" stroke-width="1.4"/>
-                <ellipse cx="42" cy="17" rx="23" ry="5.5" fill="#C8900A" stroke="#FFD700" stroke-width="1"/>
+                <ellipse cx="42" cy="52" rx="40" ry="11" fill="#8f1020" opacity=".85"/>
+                <ellipse cx="42" cy="52" rx="40" ry="11" fill="none" stroke="#ef2a3a" stroke-width="1.4" opacity=".6"/>
+                <path d="M19 50 Q21 22 42 17 Q63 22 65 50" fill="#2a0a10" stroke="#ef2a3a" stroke-width="1.4"/>
+                <ellipse cx="42" cy="17" rx="23" ry="5.5" fill="#8f1020" stroke="#ef2a3a" stroke-width="1"/>
                 <path d="M20 45 Q21.5 41.5 42 39.5 Q62.5 41.5 64 45" fill="none" stroke="#CC2200" stroke-width="4.5" stroke-linecap="round" opacity=".92"/>
             </svg>
             <span class="header-title">NexoVIP</span>
@@ -2485,7 +2485,7 @@ def generate_landing_page(link: dict, uid: str, addresses: list[str]) -> str:
         <div class="mo-title">QR CODE</div>
         <img id="qr-modal-img" src="" alt="QR">
         <div id="qr-modal-name" style="font-size:11px;color:rgba(255,255,255,0.4);margin-bottom:8px"></div>
-        <button onclick="downloadQR()" style="width:100%;padding:10px;border-radius:8px;background:linear-gradient(135deg,#FFD700,#FFC200);border:none;color:#000;font-weight:700;font-size:13px;cursor:pointer;font-family:inherit">Download QR</button>
+        <button onclick="downloadQR()" style="width:100%;padding:10px;border-radius:8px;background:linear-gradient(135deg,#ef2a3a,#ff5a63);border:none;color:#000;font-weight:700;font-size:13px;cursor:pointer;font-family:inherit">Download QR</button>
     </div>
 </div>
 
@@ -2705,7 +2705,7 @@ def generate_landing_page(link: dict, uid: str, addresses: list[str]) -> str:
     function downloadQR() {{
         const a = document.createElement('a');
         a.href = document.getElementById('qr-modal-img').src;
-        a.download = 'luffy-config-qr.png';
+        a.download = 'nexovip-config-qr.png';
         a.click();
     }}
 
@@ -3415,12 +3415,12 @@ PANEL_HTML = r"""<!DOCTYPE html>
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
 :root{
-  --gold:#FFD700;--gold2:#FFC200;--gold3:#C8900A;--gold-dim:rgba(255,215,0,0.12);
+  --gold:#ef2a3a;--gold2:#ff5a63;--gold3:#8f1020;--gold-dim:rgba(239,42,58,0.12);
   --black:#0d0507;--black2:#180a0d;--black3:#201015;
   --surface:rgba(16,4,8,0.97);--surface2:rgba(24,8,14,0.9);--surface3:rgba(32,12,20,0.8);
-  --border:rgba(255,215,0,0.1);--border2:rgba(255,215,0,0.2);
-  --text:rgba(255,255,255,0.92);--text2:rgba(255,215,0,0.7);--text3:rgba(255,255,255,0.4);
-  --gold-glow:0 0 20px rgba(255,215,0,0.4);
+  --border:rgba(239,42,58,0.1);--border2:rgba(239,42,58,0.2);
+  --text:rgba(255,255,255,0.92);--text2:rgba(239,42,58,0.7);--text3:rgba(255,255,255,0.4);
+  --gold-glow:0 0 20px rgba(239,42,58,0.4);
   --green:#4ade80;--green-dim:rgba(74,222,128,0.1);
   --red:#f87171;--red-dim:rgba(248,113,113,0.1);
   --yellow:#fbbf24;
@@ -3429,22 +3429,22 @@ PANEL_HTML = r"""<!DOCTYPE html>
 body.light-mode{
   --black:#f0f4f8;--black2:#ffffff;--black3:#e8eef5;
   --surface:rgba(255,255,255,0.97);--surface2:#ffffff;--surface3:#f8fafc;
-  --border:rgba(255,215,0,0.15);--border2:rgba(255,215,0,0.3);
+  --border:rgba(239,42,58,0.15);--border2:rgba(239,42,58,0.3);
   --text:#0f172a;--text2:#0891b2;--text3:#64748b;
-  --gold-dim:rgba(255,215,0,0.1);--gold-dim2:rgba(255,215,0,0.06);
+  --gold-dim:rgba(239,42,58,0.1);--gold-dim2:rgba(239,42,58,0.06);
   --gold-glow:0 4px 14px rgba(0,0,0,0.08);
 }
 html,body{height:100%;background:var(--black);transition:background .3s,color .3s}
 body{font-family:'Inter','Vazirmatn',sans-serif;color:var(--text);display:flex;min-height:100vh}
 body[dir="rtl"]{direction:rtl;text-align:right}
-::-webkit-scrollbar{width:4px}::-webkit-scrollbar-thumb{background:rgba(255,215,0,0.2);border-radius:4px}
+::-webkit-scrollbar{width:4px}::-webkit-scrollbar-thumb{background:rgba(239,42,58,0.2);border-radius:4px}
 .bg-fixed{position:fixed;inset:0;z-index:0;pointer-events:none;
-  background:radial-gradient(ellipse 70% 50% at 50% -10%,rgba(255,215,0,0.07),transparent 60%),
-             radial-gradient(ellipse 40% 30% at 90% 90%,rgba(255,215,0,0.04),transparent 50%)}
+  background:radial-gradient(ellipse 70% 50% at 50% -10%,rgba(239,42,58,0.07),transparent 60%),
+             radial-gradient(ellipse 40% 30% at 90% 90%,rgba(239,42,58,0.04),transparent 50%)}
 .light-mode .bg-fixed{background:none}
 .grid-fixed{position:fixed;inset:0;z-index:0;pointer-events:none;
-  background-image:linear-gradient(rgba(255,215,0,0.04) 1px,transparent 1px),
-                   linear-gradient(90deg,rgba(255,215,0,0.04) 1px,transparent 1px);
+  background-image:linear-gradient(rgba(239,42,58,0.04) 1px,transparent 1px),
+                   linear-gradient(90deg,rgba(239,42,58,0.04) 1px,transparent 1px);
   background-size:56px 56px}
 .light-mode .grid-fixed{opacity:.4}
 
@@ -3453,13 +3453,13 @@ body[dir="rtl"]{direction:rtl;text-align:right}
   border-right:1px solid var(--border);display:flex;flex-direction:column;z-index:100;
   transition:all .3s cubic-bezier(.4,0,.2,1);backdrop-filter:blur(20px)}
 .sidebar::after{content:'';position:absolute;top:0;right:0;bottom:0;width:1px;
-  background:linear-gradient(180deg,transparent,rgba(255,215,0,0.4) 30%,rgba(255,215,0,0.4) 70%,transparent)}
+  background:linear-gradient(180deg,transparent,rgba(239,42,58,0.4) 30%,rgba(239,42,58,0.4) 70%,transparent)}
 .light-mode .sidebar::after{display:none}
 .sb-brand{padding:16px 0;display:flex;flex-direction:column;align-items:center;gap:2px;
   border-bottom:1px solid var(--border);flex-shrink:0}
-.sb-hat{filter:drop-shadow(0 0 10px rgba(255,215,0,.5));transition:filter .3s}
-.sb-hat:hover{filter:drop-shadow(0 0 18px rgba(255,215,0,.9))}
-.sb-title{font-family:'Cinzel',serif;font-size:8px;letter-spacing:.18em;color:rgba(255,215,0,.6);
+.sb-hat{filter:drop-shadow(0 0 10px rgba(239,42,58,.5));transition:filter .3s}
+.sb-hat:hover{filter:drop-shadow(0 0 18px rgba(239,42,58,.9))}
+.sb-title{font-family:'Space Grotesk','Cinzel',serif;font-size:8px;letter-spacing:.18em;color:rgba(239,42,58,.6);
   text-transform:uppercase;white-space:nowrap;overflow:hidden}
 .sb-nav{flex:1;display:flex;flex-direction:column;justify-content:flex-end;padding-bottom:12px;
   gap:2px;padding-left:8px;padding-right:8px}
@@ -3469,10 +3469,10 @@ body[dir="rtl"]{direction:rtl;text-align:right}
   overflow:hidden;text-decoration:none;background:none;width:100%;font-family:inherit}
 .nav-item::before{content:'';position:absolute;inset:0;border-radius:12px;
   background:linear-gradient(135deg,var(--gold-dim),transparent);opacity:0;transition:opacity .2s}
-.nav-item:hover{color:var(--gold);border-color:rgba(255,215,0,.12)}
+.nav-item:hover{color:var(--gold);border-color:rgba(239,42,58,.12)}
 .nav-item:hover::before{opacity:1}
-.nav-item.active{color:var(--gold);border-color:rgba(255,215,0,.22);background:var(--gold-dim);
-  box-shadow:0 0 16px rgba(255,215,0,.1),inset 0 1px 0 rgba(255,215,0,.12)}
+.nav-item.active{color:var(--gold);border-color:rgba(239,42,58,.22);background:var(--gold-dim);
+  box-shadow:0 0 16px rgba(239,42,58,.1),inset 0 1px 0 rgba(239,42,58,.12)}
 .nav-item.active::before{opacity:1}
 .nav-icon{width:18px;height:18px;flex-shrink:0;transition:transform .2s}
 .nav-item:hover .nav-icon,.nav-item.active .nav-icon{transform:scale(1.1)}
@@ -3486,7 +3486,7 @@ body[dir="rtl"]{direction:rtl;text-align:right}
   color:var(--text3);font-size:9px;font-weight:700;cursor:pointer;transition:all .2s;
   font-family:inherit;letter-spacing:.05em}
 .lang-btn.active{background:var(--gold-dim);border-color:var(--gold);color:var(--gold)}
-.lang-btn:hover:not(.active){border-color:rgba(255,215,0,.15);color:rgba(255,215,0,.5)}
+.lang-btn:hover:not(.active){border-color:rgba(239,42,58,.15);color:rgba(239,42,58,.5)}
 .logout-btn{display:flex;align-items:center;justify-content:center;padding:7px;
   border:1px solid rgba(248,113,113,.15);border-radius:8px;background:rgba(248,113,113,.06);
   color:rgba(248,113,113,.6);cursor:pointer;transition:all .2s;font-size:10px;gap:4px;
@@ -3503,7 +3503,7 @@ body[dir="rtl"]{direction:rtl;text-align:right}
   border:1px solid var(--border);border-radius:8px;color:var(--text3);cursor:pointer;
   transition:all .2s;text-decoration:none;background:none}
 .sb-social-btn:hover{border-color:var(--border2);color:var(--gold);background:var(--gold-dim);
-  box-shadow:0 0 10px rgba(255,215,0,0.1)}
+  box-shadow:0 0 10px rgba(239,42,58,0.1)}
 .sb-social-btn svg{width:14px;height:14px}
 .mob-social{display:none;gap:8px;align-items:center}
 .mob-social .sb-social-btn{padding:7px}
@@ -3515,13 +3515,13 @@ body[dir="rtl"]{direction:rtl;text-align:right}
 .page.active{display:block}
 @keyframes pgIn{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
 .page-header{margin-bottom:20px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px}
-.page-title{font-family:'Cinzel',serif;font-size:16px;font-weight:700;color:var(--text);letter-spacing:.04em}
+.page-title{font-family:'Space Grotesk','Cinzel',serif;font-size:16px;font-weight:700;color:var(--text);letter-spacing:.04em}
 .page-sub{font-size:11px;color:var(--text3);margin-top:3px;letter-spacing:.02em}
 .stats-row{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:14px}
 .stat-card{background:var(--surface2);border:1px solid var(--border);border-radius:12px;
   padding:16px;position:relative;overflow:hidden;transition:all .25s;animation:cIn .5s ease both}
 .stat-card::before{content:'';position:absolute;top:0;left:0;right:0;height:1px;
-  background:linear-gradient(90deg,transparent,rgba(255,215,0,0.4),transparent)}
+  background:linear-gradient(90deg,transparent,rgba(239,42,58,0.4),transparent)}
 .light-mode .stat-card::before{display:none}
 .stat-card:hover{border-color:var(--border2);transform:translateY(-2px);box-shadow:var(--gold-glow)}
 @keyframes cIn{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:none}}
@@ -3531,15 +3531,15 @@ body[dir="rtl"]{direction:rtl;text-align:right}
 .card{background:var(--surface2);border:1px solid var(--border);border-radius:12px;padding:16px;
   margin-bottom:10px;position:relative;overflow:hidden;transition:all .25s;animation:cIn .5s ease both}
 .card::before{content:'';position:absolute;top:0;left:0;right:0;height:1px;
-  background:linear-gradient(90deg,transparent,rgba(255,215,0,0.2),transparent)}
+  background:linear-gradient(90deg,transparent,rgba(239,42,58,0.2),transparent)}
 .light-mode .card::before{display:none}
 .card-hd{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px}
 .card-title{font-size:12px;font-weight:600;color:var(--text);display:flex;align-items:center;gap:6px}
 .chart-container{height:170px;width:100%}
 .btn{font-family:inherit;font-size:11.5px;font-weight:700;border-radius:8px;padding:7px 14px;
   cursor:pointer;display:inline-flex;align-items:center;gap:5px;border:none;transition:all .2s;letter-spacing:.03em}
-.btn-gold{background:linear-gradient(135deg,#FFD700,#FFC200);color:#000;box-shadow:0 0 16px rgba(255,215,0,.25)}
-.btn-gold:hover{filter:brightness(1.1);transform:translateY(-1px);box-shadow:0 0 24px rgba(255,215,0,.4)}
+.btn-gold{background:linear-gradient(135deg,#ef2a3a,#ff5a63);color:#000;box-shadow:0 0 16px rgba(239,42,58,.25)}
+.btn-gold:hover{filter:brightness(1.1);transform:translateY(-1px);box-shadow:0 0 24px rgba(239,42,58,.4)}
 .btn-ghost{background:var(--surface3);color:var(--text);border:1px solid var(--border)}
 .btn-danger{background:var(--red-dim);color:var(--red);border:1px solid rgba(248,113,113,.15)}
 .btn-sm{padding:4px 9px;font-size:10.5px}
@@ -3575,7 +3575,7 @@ body[dir="rtl"]{direction:rtl;text-align:right}
 .fl{font-size:9.5px;font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:.08em}
 .fi,.fs{padding:8px 12px;border-radius:8px;border:1px solid var(--border);font-family:inherit;
   font-size:12.5px;outline:none;color:var(--text);background:var(--surface);transition:all .2s}
-.fi:focus,.fs:focus{border-color:var(--gold);box-shadow:0 0 0 3px rgba(255,215,0,.08)}
+.fi:focus,.fs:focus{border-color:var(--gold);box-shadow:0 0 0 3px rgba(239,42,58,.08)}
 .fr{display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end}
 .fr .fg{margin-bottom:0;flex:1;min-width:90px}
 .act-btn{font-family:inherit;font-size:9.5px;font-weight:700;border-radius:6px;padding:4px 8px;
@@ -3597,7 +3597,7 @@ body[dir="rtl"]{direction:rtl;text-align:right}
   width:100%;max-width:460px;position:relative;box-shadow:var(--gold-glow);
   transform:scale(.92);opacity:0;transition:all .38s cubic-bezier(.34,1.56,.64,1)}
 .mo.show .mo-box{transform:scale(1);opacity:1}
-.mo-title{font-family:'Cinzel',serif;font-size:14px;font-weight:700;margin-bottom:16px;
+.mo-title{font-family:'Space Grotesk','Cinzel',serif;font-size:14px;font-weight:700;margin-bottom:16px;
   color:var(--gold);letter-spacing:.06em}
 .mo-close{position:absolute;top:14px;right:14px;background:var(--surface3);border:1px solid var(--border);
   color:var(--text3);width:30px;height:30px;border-radius:7px;cursor:pointer;display:flex;
@@ -3633,12 +3633,12 @@ body[dir="rtl"]{direction:rtl;text-align:right}
   display:flex;align-items:center;gap:6px}
 .alert-item{font-size:12px;margin-bottom:4px;color:var(--text);display:flex;justify-content:space-between}
 .live-logs-container{background:#000;border:1px solid var(--border);border-radius:8px;padding:12px;
-  font-family:monospace;font-size:11px;color:#FFD700;height:200px;overflow-y:auto;white-space:pre-wrap}
+  font-family:monospace;font-size:11px;color:#ef2a3a;height:200px;overflow-y:auto;white-space:pre-wrap}
 .login-wrap{display:flex;align-items:center;justify-content:center;min-height:100vh;width:100%}
 .login-box{background:var(--surface2);border:1px solid var(--border2);border-radius:20px;
   padding:36px 32px;width:100%;max-width:360px;box-shadow:var(--gold-glow)}
 .login-logo{text-align:center;margin-bottom:28px}
-.login-title{font-family:'Cinzel',serif;font-size:22px;font-weight:900;color:var(--gold);letter-spacing:.1em}
+.login-title{font-family:'Space Grotesk','Cinzel',serif;font-size:22px;font-weight:900;color:var(--gold);letter-spacing:.1em}
 .login-sub{font-size:11px;color:var(--text3);margin-top:6px}
 
 /* Notification styles */
@@ -3721,10 +3721,10 @@ body[dir="rtl"]{direction:rtl;text-align:right}
     <div class="login-box">
       <div class="login-logo">
         <svg width="52" height="44" viewBox="0 0 84 68" fill="none">
-          <ellipse cx="42" cy="52" rx="40" ry="11" fill="#C8900A" opacity=".85"/>
-          <ellipse cx="42" cy="52" rx="40" ry="11" fill="none" stroke="#FFD700" stroke-width="1.4" opacity=".6"/>
-          <path d="M19 50 Q21 22 42 17 Q63 22 65 50" fill="#4a3a00" stroke="#FFD700" stroke-width="1.4"/>
-          <ellipse cx="42" cy="17" rx="23" ry="5.5" fill="#C8900A" stroke="#FFD700" stroke-width="1"/>
+          <ellipse cx="42" cy="52" rx="40" ry="11" fill="#8f1020" opacity=".85"/>
+          <ellipse cx="42" cy="52" rx="40" ry="11" fill="none" stroke="#ef2a3a" stroke-width="1.4" opacity=".6"/>
+          <path d="M19 50 Q21 22 42 17 Q63 22 65 50" fill="#4a3a00" stroke="#ef2a3a" stroke-width="1.4"/>
+          <ellipse cx="42" cy="17" rx="23" ry="5.5" fill="#8f1020" stroke="#ef2a3a" stroke-width="1"/>
           <path d="M20 45 Q21.5 41.5 42 39.5 Q62.5 41.5 64 45" fill="none" stroke="#CC2200" stroke-width="4.5" stroke-linecap="round" opacity=".92"/>
         </svg>
         <div class="login-title">NexoVIP PANEL</div>
@@ -3760,7 +3760,7 @@ body[dir="rtl"]{direction:rtl;text-align:right}
         </a>
       </div>
     </div>
-    <span style="font-family:'Cinzel',serif;font-size:16px;font-weight:700;color:var(--gold);letter-spacing:2px">NexoVIP</span>
+    <span style="font-family:'Space Grotesk','Cinzel',serif;font-size:16px;font-weight:700;color:var(--gold);letter-spacing:2px">NexoVIP</span>
   </div>
 
   <!-- SIDEBAR -->
@@ -3777,10 +3777,10 @@ body[dir="rtl"]{direction:rtl;text-align:right}
     <div class="sb-brand">
       <div class="sb-hat">
         <svg width="36" height="30" viewBox="0 0 84 68" fill="none">
-          <ellipse cx="42" cy="52" rx="40" ry="11" fill="#C8900A" opacity=".85"/>
-          <ellipse cx="42" cy="52" rx="40" ry="11" fill="none" stroke="#FFD700" stroke-width="1.4" opacity=".6"/>
-          <path d="M19 50 Q21 22 42 17 Q63 22 65 50" fill="#4a3a00" stroke="#FFD700" stroke-width="1.4"/>
-          <ellipse cx="42" cy="17" rx="23" ry="5.5" fill="#C8900A" stroke="#FFD700" stroke-width="1"/>
+          <ellipse cx="42" cy="52" rx="40" ry="11" fill="#8f1020" opacity=".85"/>
+          <ellipse cx="42" cy="52" rx="40" ry="11" fill="none" stroke="#ef2a3a" stroke-width="1.4" opacity=".6"/>
+          <path d="M19 50 Q21 22 42 17 Q63 22 65 50" fill="#4a3a00" stroke="#ef2a3a" stroke-width="1.4"/>
+          <ellipse cx="42" cy="17" rx="23" ry="5.5" fill="#8f1020" stroke="#ef2a3a" stroke-width="1"/>
           <path d="M20 45 Q21.5 41.5 42 39.5 Q62.5 41.5 64 45" fill="none" stroke="#CC2200" stroke-width="4.5" stroke-linecap="round" opacity=".92"/>
           <ellipse cx="35" cy="24" rx="5" ry="3" fill="rgba(255,255,255,.1)" transform="rotate(-20 35 24)"/>
         </svg>
@@ -4663,7 +4663,7 @@ function showQR(txt){
 
 function dlQR(){
   const a=document.createElement('a');
-  a.href=$m('qr-img').src;a.download='luffy-qr.png';a.click();
+  a.href=$m('qr-img').src;a.download='nexovip-qr.png';a.click();
 }
 
 async function loadSettings(){
@@ -4848,12 +4848,12 @@ function initChart(){
   if(!ctx||tChart)return;
   tChart=new Chart(ctx,{
     type:'bar',
-    data:{labels:[],datasets:[{label:'MB',data:[],backgroundColor:'rgba(255,215,0,0.4)',borderColor:'#FFD700',borderWidth:1,borderRadius:4}]},
+    data:{labels:[],datasets:[{label:'MB',data:[],backgroundColor:'rgba(239,42,58,0.4)',borderColor:'#ef2a3a',borderWidth:1,borderRadius:4}]},
     options:{responsive:true,maintainAspectRatio:false,
       plugins:{legend:{display:false}},
       scales:{
-        x:{grid:{display:false},ticks:{color:'rgba(255,215,0,0.35)',font:{size:10}}},
-        y:{grid:{color:'rgba(255,215,0,0.06)'},ticks:{color:'rgba(255,215,0,0.35)',font:{size:10},callback:v=>v+' MB'},beginAtZero:true}
+        x:{grid:{display:false},ticks:{color:'rgba(239,42,58,0.35)',font:{size:10}}},
+        y:{grid:{color:'rgba(239,42,58,0.06)'},ticks:{color:'rgba(239,42,58,0.35)',font:{size:10},callback:v=>v+' MB'},beginAtZero:true}
       }
     }
   });
@@ -4874,8 +4874,8 @@ function initChart(){
 
 function updChartColors(){
   if(!tChart)return;
-  const col=theme==='light'?'rgba(0,0,0,0.4)':'rgba(255,215,0,0.35)';
-  const gridCol=theme==='light'?'rgba(0,0,0,0.06)':'rgba(255,215,0,0.06)';
+  const col=theme==='light'?'rgba(0,0,0,0.4)':'rgba(239,42,58,0.35)';
+  const gridCol=theme==='light'?'rgba(0,0,0,0.06)':'rgba(239,42,58,0.06)';
   tChart.options.scales.x.ticks.color=col;
   tChart.options.scales.y.ticks.color=col;
   tChart.options.scales.y.grid.color=gridCol;
