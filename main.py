@@ -2760,11 +2760,29 @@ def generate_subscription_content(link: dict, uid: str, addresses: list[str]) ->
     else:
         expiry_str = f"{secs_left // 86400} Days Left"
     
+    # Numeric values for subscription-userinfo comment line
+    total_bytes = max(0, int(limit or 0))
+    expire_ts = 0
+    if expires_at_str is not None:
+        _exp_dt = parse_expires_at(expires_at_str)
+        if _exp_dt is not None:
+            expire_ts = int(_exp_dt.timestamp())
+    sub_info_line = f"# subscription-userinfo: upload={int(used or 0)}; download=0; total={total_bytes}; expire={expire_ts}"
+    profile_title = f"NexoVIP-{link['label']}"
+    
     links_out = links_for_all_variants(link, uid)
     for addr in addresses:
         links_out.extend(links_for_all_variants(link, uid, address=addr))
-
-    return "\n".join(links_out)
+    
+    # Prepend comment lines: clients like Victory parse these from the
+    # decoded body when HTTP response headers aren't readable.
+    header_lines = [
+        sub_info_line,
+        f"# profile-title: {profile_title}",
+        "# profile-update-interval: 6",
+        "",
+    ]
+    return "\n".join(header_lines + links_out)
 
 
 def generate_singbox_config(link: dict, uid: str, addresses: list[str]) -> str:
