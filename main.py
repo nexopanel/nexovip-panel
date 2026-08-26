@@ -933,9 +933,23 @@ def link_for_variant(link: dict, uid: str, auth: str, address: str = None) -> st
     if not variant or not variant.get("enabled"):
         return None
     protocol = f"{auth}-{variant['transport']}"
+    # Build a remark that includes usage/expiry so clients that don't
+    # support subscription-userinfo headers (e.g. Victory) still display it.
+    _used = link.get("used_bytes", 0) or 0
+    _limit = link.get("limit_bytes", 0) or 0
+    _usage_txt = f"{_fmt_bytes(_used)} / {'∞' if _limit == 0 else _fmt_bytes(_limit)}"
+    _exp_raw = link.get("expires_at")
+    _secs = seconds_until_expiry(_exp_raw)
+    if _secs is None:
+        _exp_txt = "∞"
+    elif _secs <= 0:
+        _exp_txt = "Expired"
+    else:
+        _exp_txt = f"{_secs // 86400}d"
+    _remark = f"{link.get('label', '')} [📊{_usage_txt} 📅{_exp_txt}]"
     return generate_vless_link(
         uid,
-        remark=f"NexoVIP-{link.get('label', '')}",
+        remark=f"NexoVIP-{_remark}",
         address=address,
         protocol=protocol,
         fingerprint=variant.get("fingerprint"),
