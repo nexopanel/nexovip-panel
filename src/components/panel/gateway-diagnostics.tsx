@@ -325,7 +325,7 @@ export function GatewayTools({ domain }: { domain: string }) {
 
       {/* ── Server config dialog ──────────────────────────────────── */}
       <Dialog open={srvOpen} onOpenChange={setSrvOpen}>
-        <DialogContent className="glass max-h-[85vh] overflow-hidden rounded-2xl border-border/80 sm:max-w-2xl">
+        <DialogContent className="glass max-h-[85vh] overflow-y-auto rounded-2xl border-border/80 sm:max-w-2xl">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <Server className="size-4 text-primary" />
@@ -338,7 +338,7 @@ export function GatewayTools({ domain }: { domain: string }) {
             <p className="py-8 text-center text-sm text-muted-foreground">{t("srvEmpty")}</p>
           ) : (
             <Tabs defaultValue="xray" className="min-h-0">
-              <TabsList className="w-full justify-start rounded-xl bg-secondary/60">
+              <TabsList className="h-auto w-full flex-wrap justify-start gap-1 rounded-xl bg-secondary/60 py-1">
                 <TabsTrigger value="xray" className="gap-1.5 rounded-lg text-xs">
                   <FileJson className="size-3.5" /> {t("tabXray")}
                 </TabsTrigger>
@@ -361,8 +361,8 @@ export function GatewayTools({ domain }: { domain: string }) {
                   }
                   meta={`${gen.routes.length} × inbound · ${gen.clientCount} ${t("srvClients")}`}
                 />
-                <ScrollArea className="h-72 rounded-xl border border-border/70 bg-background/60">
-                  <pre dir="ltr" className="p-4 font-mono text-[11px] leading-relaxed text-muted-foreground">
+                <ScrollArea className="h-56 rounded-xl border border-border/70 bg-background/60 sm:h-72">
+                  <pre dir="ltr" className="whitespace-pre-wrap break-all p-4 font-mono text-[11px] leading-relaxed text-muted-foreground">
                     {xrayJson}
                   </pre>
                 </ScrollArea>
@@ -374,8 +374,8 @@ export function GatewayTools({ domain }: { domain: string }) {
                   onDownload={() => download("nexovip-reverse-proxy.conf", gen.nginx, "text/plain")}
                   meta={`TLS @ edge :443 → 127.0.0.1:${gen.routes.map((r) => r.port).join(", ")}`}
                 />
-                <ScrollArea className="h-72 rounded-xl border border-border/70 bg-background/60">
-                  <pre dir="ltr" className="p-4 font-mono text-[11px] leading-relaxed text-muted-foreground">
+                <ScrollArea className="h-56 rounded-xl border border-border/70 bg-background/60 sm:h-72">
+                  <pre dir="ltr" className="whitespace-pre-wrap break-all p-4 font-mono text-[11px] leading-relaxed text-muted-foreground">
                     {gen.nginx}
                   </pre>
                 </ScrollArea>
@@ -387,8 +387,8 @@ export function GatewayTools({ domain }: { domain: string }) {
                   onDownload={() => download("nexovip-Caddyfile", gen.caddy, "text/plain")}
                   meta={`${domain} · automatic HTTPS`}
                 />
-                <ScrollArea className="h-72 rounded-xl border border-border/70 bg-background/60">
-                  <pre dir="ltr" className="p-4 font-mono text-[11px] leading-relaxed text-muted-foreground">
+                <ScrollArea className="h-56 rounded-xl border border-border/70 bg-background/60 sm:h-72">
+                  <pre dir="ltr" className="whitespace-pre-wrap break-all p-4 font-mono text-[11px] leading-relaxed text-muted-foreground">
                     {gen.caddy}
                   </pre>
                 </ScrollArea>
@@ -423,10 +423,10 @@ export function GatewayTools({ domain }: { domain: string }) {
                       }
                       meta="nexovip-install.sh · Ubuntu 20.04+ / Debian 11+ · root"
                     />
-                    <ScrollArea className="h-44 rounded-xl border border-border/70 bg-background/60">
+                    <ScrollArea className="h-40 rounded-xl border border-border/70 bg-background/60 sm:h-44">
                       <pre
                         dir="ltr"
-                        className="p-4 font-mono text-[11px] leading-relaxed text-muted-foreground"
+                        className="whitespace-pre-wrap break-all p-4 font-mono text-[11px] leading-relaxed text-muted-foreground"
                       >
                         {instScript}
                       </pre>
