@@ -926,30 +926,13 @@ def generate_vless_link(
     return f"{scheme}://{uuid}@{addr}:{use_port}?{query}#{quote(remark)}"
 
 
-def link_for_variant(link: dict, uid: str, auth: str, address: str = None, include_usage: bool = False) -> str | None:
+def link_for_variant(link: dict, uid: str, auth: str, address: str = None) -> str | None:
     """اگه variant مربوط به این auth (vless/trojan) روی این لینک فعال باشه، share-link
     مربوطه رو می‌سازه؛ وگرنه None برمی‌گردونه."""
     variant = sanitize_variants(link.get("variants")).get(auth)
     if not variant or not variant.get("enabled"):
         return None
-    protocol = f"{auth}-{variant['transport']}"
-    # Usage/expiry info only for the first config
-    if include_usage:
-        _used = link.get("used_bytes", 0) or 0
-        _limit = link.get("limit_bytes", 0) or 0
-        _inf = chr(8734)
-        _usage_txt = f"{_fmt_bytes(_used)} / {_inf if _limit == 0 else _fmt_bytes(_limit)}"
-        _exp_raw = link.get("expires_at")
-        _secs = seconds_until_expiry(_exp_raw)
-        if _secs is None:
-            _exp_txt = _inf
-        elif _secs <= 0:
-            _exp_txt = "Expired"
-        else:
-            _exp_txt = f"{_secs // 86400}d"
-        _remark = f"{link.get('label', '')} [📊{_usage_txt} 📅{_exp_txt}]"
-    else:
-        _remark = link.get('label', '')
+    _remark = link.get('label', '')
     return generate_vless_link(
         uid,
         remark=f"NexoVIP-{_remark}",

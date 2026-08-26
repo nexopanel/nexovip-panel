@@ -55,54 +55,38 @@ c = c.replace('Luffy-', 'NexoVIP-')
 c = c.replace("Luffy", "NexoVIP")
 
 # ═══════════════════════════════════════════════════════════════
-# 3. SUBSCRIPTION-USERINFO: Add header + body headers + update-always
+# 3. SUBSCRIPTION-USERINFO: Add update-always + profile-web-page-url + body headers
 # ═══════════════════════════════════════════════════════════════
-# Find the /sub/{uid} endpoint and add userinfo header
-# First, check if userinfo is already there
-if "subscription-userinfo" not in c:
-    # Find the endpoint and add headers after the response generation
-    # This is complex - search for the key pattern
-    pass
 
-# Find: total_bytes = max(0, int(link["limit_bytes"] or 0))
-# and the userinfo line
-if "subscription-userinfo" not in c:
-    # Add userinfo construction before the clash check
-    pat1 = '    if is_clash:'
-    userinfo_block = '''    # Client apps (v2rayNG, Hiddify, V2Box, Streisand, ...) read these headers
-    # and render them like: "Used: X GB / Total GB" + "Expiry: date".
-    #   total=0  -> shown as "Unlimited"      expire=0 -> shown as "Never Expire"
-    #   upload/download are bytes, expire is a unix timestamp.
-    total_bytes = max(0, int(link["limit_bytes"] or 0))
-    expire_ts = 0
-    if expires_at is not None:
-        expire_ts = int(expires_at.timestamp())
-    _host = request.headers.get("host") or request.url.netloc
-    sub_url = f"https://{_host}/sub/{uid}"
-    userinfo = f"upload={int(link['used_bytes'] or 0)}; download=0; total={total_bytes}; expire={expire_ts}"
+# Add profile-web-page-url and update-always to non-clash HTTP headers
+# Original has: "subscription-userinfo": f"upload=..." in the headers dict
+# We need to add profile-web-page-url before it and update-always after
 
-    if is_clash:'''
-    if pat1 in c and userinfo_block not in c:
-        c = c.replace(pat1, userinfo_block, 1)
+# Non-clash headers: add profile-web-page-url + update-always
+old_nonclash = '"subscription-userinfo": f"upload={link[\'used_bytes\']}; download=0; total={total_bytes}; expire={expire_ts}",\n    }\n\n    encoded = base64.b64encode(sub_content.encode()).decode()'
+new_nonclash = '"profile-web-page-url": sub_url,\n        "subscription-userinfo": f"upload={link[\'used_bytes\']}; download=0; total={total_bytes}; expire={expire_ts}",\n        "update-always": "true",\n    }\n\n    encoded = base64.b64encode(sub_content.encode()).decode()'
+if old_nonclash in c:
+    c = c.replace(old_nonclash, new_nonclash, 1)
+    print("PATCHED: non-clash headers + profile-web-page-url + update-always")
+else:
+    print("SKIP non-clash headers (pattern not found)")
 
-# Add subscription-userinfo header to the non-clash response
-# Find the headers dict for non-clash response and add userinfo
-pat_userinfo_header = '"profile-web-page-url": sub_url,'
-if '"subscription-userinfo": userinfo,' not in c:
-    c = c.replace(
-        '"profile-web-page-url": sub_url,',
-        '"profile-web-page-url": sub_url,\n            "subscription-userinfo": userinfo,',
-        1)
+# Clash headers: add update-always
+old_clash_h = '"subscription-userinfo": f"upload={link[\'used_bytes\']}; download=0; total={total_bytes}; expire={expire_ts}",\n        }\n        return Response(content=clash_content, headers=headers)'
+new_clash_h = '"subscription-userinfo": f"upload={link[\'used_bytes\']}; download=0; total={total_bytes}; expire={expire_ts}",\n            "update-always": "true",\n        }\n        return Response(content=clash_content, headers=headers)'
+if old_clash_h in c:
+    c = c.replace(old_clash_h, new_clash_h, 1)
+    print("PATCHED: clash headers + update-always")
+else:
+    print("SKIP clash headers (pattern not found)")
 
-# Add update-always to HTTP headers
-if '"update-always": "true",' not in c:
-    c = c.replace(
-        '"subscription-userinfo": userinfo,\n        }\n\n    sub_content = generate_subscription_content(link, uid, addresses)',
-        '"subscription-userinfo": userinfo,\n        "update-always": "true",\n    }\n\n    sub_content = generate_subscription_content(link, uid, addresses)',
-        1)
-
-# Lower profile-update-interval from 6 to 1
-c = c.replace('"profile-update-interval": "6"', '"profile-update-interval": "1"')
+# Add sub_url variable before the clash block (needed for profile-web-page-url)
+if 'sub_url = f"https://{_host}/sub/{uid}"' not in c:
+    old_url = '    if is_clash:'
+    new_url = '    _host = request.headers.get("host") or request.url.netloc\n    sub_url = f"https://{_host}/sub/{uid}"\n\n    if is_clash:'
+    if old_url in c and new_url not in c:
+        c = c.replace(old_url, new_url, 1)
+        print("PATCHED: added sub_url variable")
 
 # ═══════════════════════════════════════════════════════════════
 # 4. BODY HEADERS in generate_subscription_content
