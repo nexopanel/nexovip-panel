@@ -2959,10 +2959,17 @@ async def subscription_endpoint(uid: str, request: Request):
 
     is_clash = ("hiddify" not in ua) and any(x in ua for x in ["clash", "stash", "verge", "clashx", "clashmeta", "cfw"])
 
-    total_bytes = link["limit_bytes"] if link["limit_bytes"] > 0 else UNLIMITED_QUOTA_BYTES
+    # Client apps (v2rayNG, Hiddify, V2Box, Streisand, ...) read these headers
+    # and render them like: "Used: X GB / Total GB" + "Expiry: date".
+    #   total=0  -> shown as "Unlimited"      expire=0 -> shown as "Never Expire"
+    #   upload/download are bytes, expire is a unix timestamp.
+    total_bytes = max(0, int(link["limit_bytes"] or 0))
     expire_ts = 0
     if expires_at is not None:
         expire_ts = int(expires_at.timestamp())
+    _host = request.headers.get("host") or request.url.netloc
+    sub_url = f"https://{_host}/sub/{uid}"
+    userinfo = f"upload={int(link['used_bytes'] or 0)}; download=0; total={total_bytes}; expire={expire_ts}"
 
     if is_clash:
         clash_content = generate_clash_config(link, uid, addresses)
@@ -2970,7 +2977,8 @@ async def subscription_endpoint(uid: str, request: Request):
             "Content-Type": "text/yaml; charset=utf-8",
             "Content-Disposition": 'attachment; filename="clash.yaml"',
             "profile-update-interval": "6",
-            "subscription-userinfo": f"upload={link['used_bytes']}; download=0; total={total_bytes}; expire={expire_ts}",
+            "profile-web-page-url": sub_url,
+            "subscription-userinfo": userinfo,
         }
         return Response(content=clash_content, headers=headers)
 
@@ -2980,7 +2988,8 @@ async def subscription_endpoint(uid: str, request: Request):
         "Content-Type": "text/plain; charset=utf-8",
         "profile-update-interval": "6",
         "profile-title": "base64:" + base64.b64encode(f"NexoVIP-{link['label']}".encode()).decode(),
-        "subscription-userinfo": f"upload={link['used_bytes']}; download=0; total={total_bytes}; expire={expire_ts}",
+        "profile-web-page-url": sub_url,
+        "subscription-userinfo": userinfo,
     }
 
     encoded = base64.b64encode(sub_content.encode()).decode()
@@ -3473,6 +3482,7 @@ body[dir="rtl"]{direction:rtl;text-align:right}
 .light-mode .stat-card::before{display:none}
 .stat-card:hover{border-color:var(--border2);transform:translateY(-2px);box-shadow:var(--gold-glow)}
 @keyframes cIn{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:none}}
+@keyframes fadeIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
 .stat-label{font-size:9.5px;color:var(--text3);font-weight:700;text-transform:uppercase;letter-spacing:.08em;margin-bottom:8px}
 .stat-val{font-size:20px;font-weight:700;color:var(--text);letter-spacing:-.02em}
 .stat-unit{font-size:11px;font-weight:400;color:var(--text3)}
@@ -3597,6 +3607,23 @@ body[dir="rtl"]{direction:rtl;text-align:right}
 .notif-icon{width:36px;height:36px;border-radius:10px;display:flex;align-items:center;justify-content:center;flex-shrink:0;font-size:18px}
 .notif-icon.update{background:rgba(56,189,248,.12);color:#38bdf8}
 .notif-icon.quota{background:var(--red-dim);color:var(--red)}
+.sub-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:14px}
+.sub-card{background:var(--surface);border:1px solid var(--border);border-radius:16px;padding:16px;position:relative;overflow:hidden;animation:fadeIn .35s ease both}
+.sub-card::before{content:'';position:absolute;top:0;left:0;right:0;height:2px;background:linear-gradient(90deg,transparent,var(--gold),transparent);opacity:.6}
+.sub-head{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:12px;flex-wrap:wrap}
+.sub-name{font-size:15px;font-weight:700;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.sub-info{display:flex;flex-direction:column;gap:10px;margin-bottom:12px}
+.sub-line{display:flex;align-items:center;gap:8px;font-size:12.5px;color:var(--text2);flex-wrap:wrap}
+.sub-line b{color:var(--text1);font-weight:600}
+.sub-bar{height:6px;background:var(--surface3);border-radius:99px;overflow:hidden;margin-top:6px}
+.sub-bar-fill{height:100%;border-radius:99px;background:linear-gradient(90deg,var(--gold),#ff5a63);transition:width .6s ease;box-shadow:0 0 10px rgba(239,42,58,.5)}
+.sub-url{display:flex;gap:6px;align-items:center;background:var(--surface3);border:1px solid var(--border);border-radius:10px;padding:8px 10px;font-family:monospace;font-size:11px;color:var(--text3);overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
+.sub-actions{display:flex;gap:6px;margin-top:10px;flex-wrap:wrap}
+.sub-actions .btn{flex:1;justify-content:center;padding:8px;font-size:12px}
+.sub-badge{font-size:10px;font-weight:700;padding:3px 8px;border-radius:99px;letter-spacing:.5px;text-transform:uppercase}
+.sub-badge.ok{background:rgba(46,204,113,.14);color:var(--green)}
+.sub-badge.warn{background:rgba(241,196,15,.14);color:var(--yellow)}
+.sub-badge.bad{background:var(--red-dim);color:var(--red)}
 .notif-icon.expiry{background:rgba(251,191,36,.12);color:var(--yellow)}
 .notif-icon.info{background:rgba(74,222,128,.12);color:var(--green)}
 .notif-body{flex:1;min-width:0}
@@ -3745,6 +3772,11 @@ body[dir="rtl"]{direction:rtl;text-align:right}
         <span class="nav-label" data-en="Inbounds" data-fa="اینباندها">Inbounds</span>
         <span class="nav-badge" id="nb">0</span>
       </button>
+      <button class="nav-item" data-page="subs">
+        <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 6h16M4 12h10M4 18h7"/><circle cx="18" cy="18" r="3"/></svg>
+        <span class="nav-label" data-en="Subs" data-fa="ساب‌ها">Subs</span>
+        <span class="nav-badge" id="sb-badge">0</span>
+      </button>
       <button class="nav-item" data-page="traffic">
         <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
         <span class="nav-label" data-en="Traffic" data-fa="ترافیک">Traffic</span>
@@ -3865,6 +3897,19 @@ body[dir="rtl"]{direction:rtl;text-align:right}
         <div class="m-cards" id="mcards"></div>
         <div class="empty" id="lempty" style="display:none" data-en="No inbounds found" data-fa="هیچ اینباندی یافت نشد">No inbounds found</div>
       </div>
+    </section>
+
+    <!-- Subs -->
+    <section class="page" id="page-subs">
+      <div class="page-header">
+        <div>
+          <div class="page-title" data-en="Subscriptions" data-fa="سابسکریپشن‌ها">Subscriptions</div>
+          <div class="page-sub" data-en="Volume & expiry shown inside VPN client apps (v2rayNG, Hiddify, V2Box, ...)" data-fa="حجم و زمان انقضا داخل اپ‌های کلاینت نمایش داده می‌شه (v2rayNG، Hiddify، V2Box و ...)">Volume & expiry shown inside VPN client apps (v2rayNG, Hiddify, V2Box, ...)</div>
+        </div>
+        <button class="btn btn-gold" onclick="showAddMo()" data-en="+ New Sub" data-fa="+ ساب جدید">+ New Sub</button>
+      </div>
+      <div class="sub-grid" id="subs-grid"></div>
+      <div class="empty" id="subs-empty" style="display:none" data-en="No subscriptions yet — create an inbound first" data-fa="هنوز سابی نیست — اول یه اینباند بساز">No subscriptions yet — create an inbound first</div>
     </section>
 
     <!-- Traffic -->
@@ -4330,6 +4375,7 @@ function switchPage(id){
   const target=$m('page-'+id);
   if(target)target.classList.add('active');
   document.querySelectorAll('.nav-item').forEach(n=>n.classList.toggle('active',n.dataset.page===id));
+  if(id==='subs')renderSubs();
 }
 
 function toast(msg,err=false){
@@ -4375,6 +4421,67 @@ function filterLinks(){
   else if(cf==='off')r=r.filter(l=>!l.active);
   if(q)r=r.filter(l=>l.label.toLowerCase().includes(q)||l.uuid.toLowerCase().includes(q));
   renderLinks(r);
+}
+
+function subStatus(l){
+  const now=Date.now();
+  if(!l.active)return['bad',lang==='fa'?'غیرفعال':'Disabled'];
+  if(l.expires_at){
+    const t=new Date(l.expires_at).getTime();
+    if(t&&t<now)return['bad',lang==='fa'?'منقضی شده':'Expired'];
+    if(t&&t-now<=3*86400000)return['warn',lang==='fa'?'به‌زودی منقضی':'Expiring soon'];
+  }
+  if(l.limit_bytes>0&&(l.used_bytes||0)>=l.limit_bytes)return['warn',lang==='fa'?'حجم پر شد':'Quota reached'];
+  return['ok',lang==='fa'?'فعال':'Active'];
+}
+
+function fmtExpRemain(l){
+  if(!l.expires_at)return lang==='fa'?'هرگز منقضی نمی‌شه':'Never Expire';
+  const t=new Date(l.expires_at).getTime();
+  if(!t)return lang==='fa'?'هرگز منقضی نمی‌شه':'Never Expire';
+  const d=t-Date.now();
+  if(d<=0)return lang==='fa'?'منقضی شده':'Expired';
+  const days=Math.floor(d/86400000),hrs=Math.floor((d%86400000)/3600000);
+  return new Date(t).toLocaleDateString()+' ('+days+'d '+hrs+'h)';
+}
+
+function renderSubs(){
+  const grid=$m('subs-grid'),em=$m('subs-empty');
+  if(!grid)return;
+  const list=allLinks||[];
+  const badge=$m('sb-badge');if(badge)badge.textContent=list.length;
+  if(!list.length){grid.innerHTML='';em.style.display='block';em.textContent=em.getAttribute('data-'+lang)||'No subscriptions yet';return}
+  em.style.display='none';
+  grid.innerHTML=list.map(l=>{
+    const u=l.used_bytes||0,lim=l.limit_bytes||0;
+    const pct=lim>0?Math.min(100,(u/lim)*100):0;
+    const col=pct>90?'var(--red)':pct>70?'var(--yellow)':'var(--gold)';
+    const totalTxt=lim>0?fmtB(lim):(lang==='fa'?'نامحدود':'Unlimited');
+    const usedTxt=fmtB(u);
+    const scls=subStatus(l)[0],stxt=subStatus(l)[1];
+    const subUrl='https://'+location.host+'/sub/'+l.uuid;
+    const proto=protoBadge(l.variants);
+    return `<div class="sub-card">
+      <div class="sub-head">
+        <div class="sub-name">🧾 ${esc(l.label)} <span class="tag tag-vless">${proto}</span></div>
+        <span class="sub-badge ${scls}">${stxt}</span>
+      </div>
+      <div class="sub-info">
+        <div>
+          <div class="sub-line">📊 <span>${lang==='fa'?'مصرف‌شده':'Used'}: <b>${usedTxt}</b> / ${totalTxt}</span></div>
+          <div class="sub-bar"><div class="sub-bar-fill" style="width:${lim>0?pct:(u>0?8:2)}%;background:${lim>0?col:'var(--gold)'}"></div></div>
+        </div>
+        <div class="sub-line">📅 <span>${lang==='fa'?'انقضا':'Expiry'}: <b>${fmtExpRemain(l)}</b></span></div>
+        <div class="sub-line">🔗 <span>${lang==='fa'?'حداکثر آی‌پی':'Max IPs'}: <b>${l.max_connections||'∞'}</b> · ${lang==='fa'?'آی‌پی متصل':'Connected'}: <b>${l.current_connections||0}</b></span></div>
+      </div>
+      <div class="sub-url" title="${subUrl}">${subUrl}</div>
+      <div class="sub-actions">
+        <button class="btn btn-gold" onclick="cpSub('${l.uuid}')">📋 ${lang==='fa'?'کپی ساب':'Copy Sub'}</button>
+        <button class="btn btn-ghost" onclick="showQR('${subUrl}')">📱 QR</button>
+        <button class="btn btn-ghost" onclick="showEditMo('${l.uuid}')">✏️ ${tr('edit')}</button>
+      </div>
+    </div>`;
+  }).join('');
 }
 
 function processAlertsAndCharts(){
@@ -4776,7 +4883,7 @@ async function loadLinks(){
     if(r.status===401){showLogin();return}
     if(!r.ok)throw new Error();
     const d=await r.json();
-    allLinks=d.links||[];filterLinks();
+    allLinks=d.links||[];filterLinks();renderSubs();
   }catch(e){}
 }
 
