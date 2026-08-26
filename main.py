@@ -2779,11 +2779,30 @@ def generate_subscription_content(link: dict, uid: str, addresses: list[str]) ->
     else:
         expiry_str = f"{secs_left // 86400} Days Left"
     
+    # Numeric values for body headers
+    total_bytes = max(0, int(limit or 0))
+    expire_ts = 0
+    if expires_at_str is not None:
+        _exp_dt = parse_expires_at(expires_at_str)
+        if _exp_dt is not None:
+            expire_ts = int(_exp_dt.timestamp())
+    sub_info_line = f'subscription-userinfo: "upload={int(used or 0)}; download=0; total={total_bytes}; expire={expire_ts}"'
+    profile_title = f"NexoVIP-{link['label']}"
+    
     links_out = links_for_all_variants(link, uid)
     for addr in addresses:
         links_out.extend(links_for_all_variants(link, uid, address=addr))
-
-    return "\n".join(links_out)
+    
+    # Body headers: v2RayTun and similar clients parse these from the
+    # decoded body. Format: key: "value" (no # prefix, with quotes).
+    header_lines = [
+        sub_info_line,
+        f'profile-title: "{profile_title}"',
+        'profile-update-interval: "1"',
+        'update-always: "true"',
+        "",
+    ]
+    return "\n".join(header_lines + links_out)
 
 
 def generate_singbox_config(link: dict, uid: str, addresses: list[str]) -> str:
@@ -2983,6 +3002,9 @@ async def subscription_endpoint(uid: str, request: Request):
     if expires_at is not None:
         expire_ts = int(expires_at.timestamp())
 
+    _host = request.headers.get("host") or request.url.netloc
+    sub_url = f"https://{_host}/sub/{uid}"
+
     if is_clash:
         clash_content = generate_clash_config(link, uid, addresses)
         headers = {
@@ -2990,6 +3012,7 @@ async def subscription_endpoint(uid: str, request: Request):
             "Content-Disposition": 'attachment; filename="clash.yaml"',
             "profile-update-interval": "1",
             "subscription-userinfo": f"upload={link['used_bytes']}; download=0; total={total_bytes}; expire={expire_ts}",
+            "update-always": "true",
         }
         return Response(content=clash_content, headers=headers)
 
@@ -2999,7 +3022,9 @@ async def subscription_endpoint(uid: str, request: Request):
         "Content-Type": "text/plain; charset=utf-8",
         "profile-update-interval": "1",
         "profile-title": "base64:" + base64.b64encode(f"NexoVIP-{link['label']}".encode()).decode(),
+        "profile-web-page-url": sub_url,
         "subscription-userinfo": f"upload={link['used_bytes']}; download=0; total={total_bytes}; expire={expire_ts}",
+        "update-always": "true",
     }
 
     encoded = base64.b64encode(sub_content.encode()).decode()
