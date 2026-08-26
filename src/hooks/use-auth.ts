@@ -1,4 +1,4 @@
-import { api, subscribe } from "@/lib/luffy/api";
+import { api, ready, subscribe } from "@/lib/luffy/api";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 /**
@@ -20,7 +20,7 @@ export function useAuth() {
       setStatus(api.me() ? "authed" : "guest");
     };
 
-    void api.ready().then(() => {
+    void ready().then(() => {
       readyRef.current = true;
       evaluate();
     });

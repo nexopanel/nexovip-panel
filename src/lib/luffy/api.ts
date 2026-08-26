@@ -275,7 +275,7 @@ export const api = {
     const db = getDb();
     const curHash = await hashPassword(currentPassword, SECRET);
     if (curHash !== db.auth.password_hash) throw new Error("wrong-password");
-    db.auth.password_hash = await hashPassword(newPassword, secretRef());
+    db.auth.password_hash = await hashPassword(newPassword, SECRET);
     createNotification("security", "Password changed", "Admin password was updated.");
     emit();
   },

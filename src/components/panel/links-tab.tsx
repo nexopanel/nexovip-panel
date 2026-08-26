@@ -44,12 +44,17 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { api, ALPN_OPTIONS, FINGERPRINTS, TRANSPORTS } from "@/lib/luffy/api";
+import {
+  api,
+  ALPN_OPTIONS,
+  FINGERPRINTS,
+  TRANSPORTS,
+  type LinkView,
+} from "@/lib/luffy/api";
 import {
   DEFAULT_ALPN_BY_TRANSPORT,
   type AuthType,
   type Fingerprint,
-  type LinkView,
   type Transport,
 } from "@/lib/luffy/core";
 import { useI18n, type DictKey } from "@/lib/i18n";
