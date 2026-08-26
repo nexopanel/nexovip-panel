@@ -2781,19 +2781,20 @@ def generate_subscription_content(link: dict, uid: str, addresses: list[str]) ->
         _exp_dt = parse_expires_at(expires_at_str)
         if _exp_dt is not None:
             expire_ts = int(_exp_dt.timestamp())
-    sub_info_line = f"# subscription-userinfo: upload={int(used or 0)}; download=0; total={total_bytes}; expire={expire_ts}"
+    sub_info_line = f'subscription-userinfo: "upload={int(used or 0)}; download=0; total={total_bytes}; expire={expire_ts}"'
     profile_title = f"NexoVIP-{link['label']}"
     
     links_out = links_for_all_variants(link, uid)
     for addr in addresses:
         links_out.extend(links_for_all_variants(link, uid, address=addr))
     
-    # Prepend comment lines: clients like Victory parse these from the
-    # decoded body when HTTP response headers aren't readable.
+    # Body headers: v2RayTun and similar clients parse these from the
+    # decoded body. Format: key: "value" (no # prefix, with quotes).
     header_lines = [
         sub_info_line,
-        f"# profile-title: {profile_title}",
-        "# profile-update-interval: 6",
+        f'profile-title: "{profile_title}"',
+        'profile-update-interval: "1"',
+        'update-always: "true"',
         "",
     ]
     return "\n".join(header_lines + links_out)
@@ -3008,9 +3009,10 @@ async def subscription_endpoint(uid: str, request: Request):
         headers = {
             "Content-Type": "text/yaml; charset=utf-8",
             "Content-Disposition": 'attachment; filename="clash.yaml"',
-            "profile-update-interval": "6",
+            "profile-update-interval": "1",
             "profile-web-page-url": sub_url,
             "subscription-userinfo": userinfo,
+            "update-always": "true",
         }
         return Response(content=clash_content, headers=headers)
 
@@ -3018,10 +3020,11 @@ async def subscription_endpoint(uid: str, request: Request):
 
     headers = {
         "Content-Type": "text/plain; charset=utf-8",
-        "profile-update-interval": "6",
+        "profile-update-interval": "1",
         "profile-title": "base64:" + base64.b64encode(f"NexoVIP-{link['label']}".encode()).decode(),
         "profile-web-page-url": sub_url,
         "subscription-userinfo": userinfo,
+        "update-always": "true",
     }
 
     encoded = base64.b64encode(sub_content.encode()).decode()
