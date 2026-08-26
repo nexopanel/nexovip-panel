@@ -8,6 +8,7 @@ import {
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
 import type { NotificationRow } from "@/lib/luffy/db";
+import { api } from "@/lib/luffy/api";
 import { useI18n, type DictKey } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 import {
@@ -157,7 +158,7 @@ export function PanelShell({
                   >
                     <Bell className="size-4 text-foreground/85" />
                     {unreadCount > 0 && (
-                      <span className="absolute -end-1 -top-1 flex size-4.5 h-auto min-w-4.5 items-center justify-center rounded-full bg-gradient-to-br from-[#ff4d59] to-[#b91c2e] px-1 text-[10px] font-bold leading-none text-white shadow-md shadow-red-950">
+                      <span className="absolute -end-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-gradient-to-br from-[#ff4d59] to-[#b91c2e] px-1 text-[10px] font-bold leading-none text-white shadow-md shadow-red-950">
                         {unreadCount > 9 ? "9+" : unreadCount}
                       </span>
                     )}
@@ -234,6 +235,3 @@ export function PanelShell({
     </div>
   );
 }
-
-// Local import kept at bottom to avoid circulars in editors — plain module import
-import { api } from "@/lib/luffy/api";
