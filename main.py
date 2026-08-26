@@ -3415,36 +3415,36 @@ PANEL_HTML = r"""<!DOCTYPE html>
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
 :root{
-  --gold:#ef2a3a;--gold2:#ff5a63;--gold3:#8f1020;--gold-dim:rgba(239,42,58,0.12);
-  --black:#0d0507;--black2:#180a0d;--black3:#201015;
-  --surface:rgba(16,4,8,0.97);--surface2:rgba(24,8,14,0.9);--surface3:rgba(32,12,20,0.8);
-  --border:rgba(239,42,58,0.1);--border2:rgba(239,42,58,0.2);
-  --text:rgba(255,255,255,0.92);--text2:rgba(239,42,58,0.7);--text3:rgba(255,255,255,0.4);
-  --gold-glow:0 0 20px rgba(239,42,58,0.4);
-  --green:#4ade80;--green-dim:rgba(74,222,128,0.1);
-  --red:#f87171;--red-dim:rgba(248,113,113,0.1);
-  --yellow:#fbbf24;
+  --gold:#ff3048;--gold2:#ff6678;--gold3:#9d1025;--gold-dim:rgba(255,48,72,0.12);
+  --black:#050608;--black2:#0b0d11;--black3:#12151b;
+  --surface:rgba(12,15,20,0.97);--surface2:rgba(18,22,29,0.94);--surface3:rgba(26,31,40,0.86);
+  --border:rgba(255,48,72,0.16);--border2:rgba(255,48,72,0.34);
+  --text:rgba(246,248,252,0.94);--text2:rgba(255,102,120,0.82);--text3:rgba(177,185,198,0.58);
+  --gold-glow:0 0 24px rgba(255,48,72,0.28);
+  --green:#49e58d;--green-dim:rgba(73,229,141,0.1);
+  --red:#ff5268;--red-dim:rgba(255,82,104,0.12);
+  --yellow:#ffbd4a;
   --nav-w:64px;
 }
 body.light-mode{
-  --black:#f0f4f8;--black2:#ffffff;--black3:#e8eef5;
-  --surface:rgba(255,255,255,0.97);--surface2:#ffffff;--surface3:#f8fafc;
-  --border:rgba(239,42,58,0.15);--border2:rgba(239,42,58,0.3);
-  --text:#0f172a;--text2:#0891b2;--text3:#64748b;
-  --gold-dim:rgba(239,42,58,0.1);--gold-dim2:rgba(239,42,58,0.06);
-  --gold-glow:0 4px 14px rgba(0,0,0,0.08);
+  --black:#eef1f5;--black2:#ffffff;--black3:#e3e7ed;
+  --surface:rgba(255,255,255,0.98);--surface2:#ffffff;--surface3:#f6f8fb;
+  --border:rgba(190,24,48,0.16);--border2:rgba(190,24,48,0.3);
+  --text:#151922;--text2:#b71832;--text3:#657083;
+  --gold-dim:rgba(190,24,48,0.09);--gold-dim2:rgba(190,24,48,0.05);
+  --gold-glow:0 5px 18px rgba(80,10,20,0.12);
 }
 html,body{height:100%;background:var(--black);transition:background .3s,color .3s}
 body{font-family:'Inter','Vazirmatn',sans-serif;color:var(--text);display:flex;min-height:100vh}
 body[dir="rtl"]{direction:rtl;text-align:right}
-::-webkit-scrollbar{width:4px}::-webkit-scrollbar-thumb{background:rgba(239,42,58,0.2);border-radius:4px}
+::-webkit-scrollbar{width:4px}::-webkit-scrollbar-thumb{background:rgba(255,48,72,0.38);border-radius:4px}
 .bg-fixed{position:fixed;inset:0;z-index:0;pointer-events:none;
-  background:radial-gradient(ellipse 70% 50% at 50% -10%,rgba(239,42,58,0.07),transparent 60%),
-             radial-gradient(ellipse 40% 30% at 90% 90%,rgba(239,42,58,0.04),transparent 50%)}
+  background:radial-gradient(ellipse 70% 50% at 50% -10%,rgba(255,48,72,0.10),transparent 60%),
+             radial-gradient(ellipse 40% 30% at 90% 90%,rgba(157,16,37,0.08),transparent 50%)}
 .light-mode .bg-fixed{background:none}
 .grid-fixed{position:fixed;inset:0;z-index:0;pointer-events:none;
-  background-image:linear-gradient(rgba(239,42,58,0.04) 1px,transparent 1px),
-                   linear-gradient(90deg,rgba(239,42,58,0.04) 1px,transparent 1px);
+  background-image:linear-gradient(rgba(255,48,72,0.045) 1px,transparent 1px),
+                   linear-gradient(90deg,rgba(255,48,72,0.045) 1px,transparent 1px);
   background-size:56px 56px}
 .light-mode .grid-fixed{opacity:.4}
 
