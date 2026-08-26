@@ -1,19 +1,50 @@
-import { api } from "@/convex/_generated/api";
-import { useAuthActions } from "@convex-dev/auth/react";
-import { useConvexAuth, useQuery } from "convex/react";
+import { api, subscribe } from "@/lib/luffy/api";
+import { useCallback, useEffect, useRef, useState } from "react";
 
+/**
+ * Auth state backed by the LUFFY_PANEL-style session API.
+ * Shape-compatible with the previous hook consumers:
+ *   { isLoading, isAuthenticated, signIn, signOut }
+ */
 export function useAuth() {
-  const { isLoading: isAuthLoading, isAuthenticated } = useConvexAuth();
-  const user = useQuery(api.users.currentUser);
-  const { signIn, signOut } = useAuthActions();
+  const [status, setStatus] = useState<"loading" | "authed" | "guest">(
+    "loading",
+  );
+  const readyRef = useRef(false);
 
-  // Derive isLoading directly from the dependencies instead of managing separate state
-  const isLoading = isAuthLoading || user === undefined;
+  useEffect(() => {
+    let mounted = true;
+
+    const evaluate = () => {
+      if (!mounted || !readyRef.current) return;
+      setStatus(api.me() ? "authed" : "guest");
+    };
+
+    void api.ready().then(() => {
+      readyRef.current = true;
+      evaluate();
+    });
+
+    const unsubscribe = subscribe(evaluate);
+    return () => {
+      mounted = false;
+      unsubscribe();
+    };
+  }, []);
+
+  const signIn = useCallback(async (password: string) => {
+    await api.login(password);
+    setStatus("authed");
+  }, []);
+
+  const signOut = useCallback(async () => {
+    await api.logout();
+    setStatus("guest");
+  }, []);
 
   return {
-    isLoading,
-    isAuthenticated,
-    user,
+    isLoading: status === "loading",
+    isAuthenticated: status === "authed",
     signIn,
     signOut,
   };
