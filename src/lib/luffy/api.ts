@@ -91,8 +91,17 @@ function requireAuth(): void {
   }
 }
 
-/** get_domain() equivalent — the panel's own host is used as host/sni */
+/**
+ * get_domain() equivalent — the configured gateway domain (settings table)
+ * wins when set, otherwise the panel's own host is used.
+ */
 export function getDomain(): string {
+  try {
+    const override = getDb().settings["server_domain"];
+    if (override) return override;
+  } catch {
+    /* db not initialized yet */
+  }
   if (typeof window === "undefined") return "localhost";
   return window.location.host || "localhost";
 }
@@ -100,7 +109,8 @@ export function getDomain(): string {
 // ── Config URI generation (build_config_uri equivalents) ────────────────
 
 function buildPath(auth: AuthType, transport: Transport, uuid: string): string {
-  if (transport === "ws") return `/ws/${auth}/${uuid}`;
+  // ws paths carry the early-data hint (?ed=2048), exactly like LUFFY_PANEL
+  if (transport === "ws") return `/ws/${auth}/${uuid}?ed=2048`;
   const mode = transport === "xhttp-packet-up" ? "packet-up" : "stream-up";
   return `/xhttp/${auth}/${mode}/${uuid}`;
 }
@@ -109,6 +119,7 @@ function buildUri(
   auth: AuthType,
   variant: { transport: Transport; fingerprint: string; alpn: string },
   uuid: string,
+  domain: string,
   address: string,
   fragment: string,
 ): string {
@@ -122,9 +133,13 @@ function buildUri(
     params.set("type", "xhttp");
     params.set("mode", variant.transport === "xhttp-packet-up" ? "packet-up" : "stream-up");
   }
-  params.set("host", address);
+  // CRITICAL (matches generate_vless_link in LUFFY_PANEL): host/sni must
+  // stay the REAL domain — only the dial address (@addr:443) may be swapped
+  // for a clean IP. Putting the IP into host/sni breaks TLS routing and the
+  // Host header, which yields working TCP ping but a dead tunnel.
+  params.set("host", domain);
   params.set("path", buildPath(auth, variant.transport, uuid));
-  params.set("sni", address);
+  params.set("sni", domain);
   params.set("fp", variant.fingerprint);
   params.set("alpn", variant.alpn);
   return `${scheme}://${uuid}@${address}:${DEFAULT_PORT}?${params.toString()}#${encodeURIComponent(fragment)}`;
@@ -139,20 +154,20 @@ export interface ConfigLine {
 
 /** One line per enabled protocol × configured address, like /sub/<uid> */
 export function configLinesFor(link: LinkRow): ConfigLine[] {
-  const addresses = [getDomain(), ...getDb().custom_addresses];
+  const domain = getDomain();
+  const addresses = [domain, ...getDb().custom_addresses];
   const lines: ConfigLine[] = [];
   for (const auth of ["vless", "trojan"] as AuthType[]) {
     const variant = link.variants[auth];
     if (!variant?.enabled) continue;
     for (const address of addresses) {
-      const suffix =
-        address === getDomain() ? "" : `-${address.replace(/[^\w.-]/g, "")}`;
+      const suffix = address === domain ? "" : `-${address.replace(/[^\w.-]/g, "")}`;
       const protoTag = link.variants.vless.enabled && link.variants.trojan.enabled ? `-${auth}` : "";
       lines.push({
         auth,
         transport: variant.transport,
         address,
-        uri: buildUri(auth, variant, link.uuid, address, `Nexo-${link.label}${protoTag}${suffix}`),
+        uri: buildUri(auth, variant, link.uuid, domain, address, `Nexo-${link.label}${protoTag}${suffix}`),
       });
     }
   }
@@ -448,6 +463,31 @@ export const api = {
       createNotification("ip", "Railway IPs imported", `${added} addresses imported from railway_ips.txt.`);
     emit();
     return { added, skipped };
+  },
+
+  // ── Settings: gateway/server domain (settings table) ─────────────────
+  /** Empty string means "use this panel's own host" */
+  getServerDomain(): string {
+    requireAuth();
+    return getDb().settings["server_domain"] ?? "";
+  },
+
+  setServerDomain(domain: string): void {
+    requireAuth();
+    const cleaned = domain
+      .trim()
+      .replace(/^https?:\/\//i, "")
+      .replace(/\/.*$/, "");
+    if (cleaned && !/^[\w.-]+$/.test(cleaned)) throw new Error("invalid-domain");
+    const db = getDb();
+    if (cleaned) {
+      db.settings["server_domain"] = cleaned.toLowerCase();
+      createNotification("system", "Gateway domain updated", `Configs now target ${cleaned}.`);
+    } else {
+      delete db.settings["server_domain"];
+      createNotification("system", "Gateway domain reset", "Configs fall back to this panel's own host.");
+    }
+    emit();
   },
 
   // ── GET /stats ───────────────────────────────────────────────────────

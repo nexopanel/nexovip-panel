@@ -28,6 +28,16 @@ export function AddressesTab({ addresses }: { addresses: string[] }) {
   const { t } = useI18n();
   const [draft, setDraft] = useState("");
   const [confirmClear, setConfirmClear] = useState(false);
+  const [gateway, setGateway] = useState(() => api.getServerDomain());
+
+  const handleSaveGateway = () => {
+    try {
+      api.setServerDomain(gateway);
+      toast.success(t(gateway ? "gwSaved" : "gwReset"));
+    } catch {
+      toast.error(t("gwInvalid"));
+    }
+  };
 
   const handleAdd = () => {
     const value = draft.trim();
@@ -49,21 +59,42 @@ export function AddressesTab({ addresses }: { addresses: string[] }) {
         subtitle={t("ipsSubtitle")}
       />
 
-      {/* Main domain */}
+      {/* Gateway domain — where generated configs actually dial */}
       <Card className="glass glow-red-sm rounded-2xl border-primary/20">
-        <CardContent className="flex items-center gap-4 p-5">
-          <div className="flex size-11 shrink-0 items-center justify-center rounded-xl border border-emerald-400/30 bg-emerald-400/10 text-emerald-300">
-            <Server className="size-5" />
+        <CardContent className="space-y-4 p-5">
+          <div className="flex items-center gap-4">
+            <div className="flex size-11 shrink-0 items-center justify-center rounded-xl border border-emerald-400/30 bg-emerald-400/10 text-emerald-300">
+              <Server className="size-5" />
+            </div>
+            <div className="min-w-0 flex-1">
+              <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
+                {t("gwTitle")}
+              </p>
+              <code className="mt-0.5 block truncate font-mono text-sm font-semibold" dir="ltr">
+                {getDomain()}
+              </code>
+            </div>
+            <CopyButton value={getDomain()} />
           </div>
-          <div className="min-w-0 flex-1">
-            <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
-              {t("mainDomain")}
-            </p>
-            <code className="mt-0.5 block truncate font-mono text-sm font-semibold" dir="ltr">
-              {getDomain()}
-            </code>
+
+          <div className="flex gap-2">
+            <Input
+              value={gateway}
+              onChange={(e) => setGateway(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && handleSaveGateway()}
+              placeholder={t("gwPlaceholder")}
+              dir="ltr"
+              className="h-10 rounded-xl border-border/80 bg-background/50 font-mono text-sm"
+            />
+            <Button
+              onClick={handleSaveGateway}
+              className="h-10 shrink-0 gap-2 rounded-xl bg-gradient-to-r from-[#b91c2e] to-[#ef2a3a] px-4 font-bold text-white shadow-lg shadow-red-950/50 hover:brightness-110"
+            >
+              {t("save")}
+            </Button>
           </div>
-          <CopyButton value={getDomain()} />
+
+          <p className="text-xs leading-relaxed text-muted-foreground">{t("gwHint")}</p>
         </CardContent>
       </Card>
 

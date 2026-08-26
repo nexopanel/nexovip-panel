@@ -177,7 +177,13 @@ const en = {
   ipsTitle: "Clean IPs",
   ipsSubtitle:
     "Alternative addresses appended to every subscription alongside the panel domain.",
-  mainDomain: "Main domain (automatic)",
+  gwTitle: "Gateway domain",
+  gwHint:
+    "Every generated config dials this domain on port 443 and expects a live VLESS/Trojan tunnel behind it (LUFFY_PANEL or a matching Xray/sing-box inbound). A regular website on 443 answers TCP ping but fails the real handshake — which is exactly why configs can “ping” yet never connect.",
+  gwPlaceholder: "vpn.example.com — empty = this panel's host",
+  gwSaved: "Gateway updated — all links regenerated",
+  gwReset: "Gateway reset to this panel's host",
+  gwInvalid: "Invalid domain.",
   addIpPlaceholder: "ip-or-domain.example.com",
   addIp: "Add address",
   ipInvalid: "Invalid address format.",
@@ -356,7 +362,13 @@ const fa: Record<DictKey, string> = {
   ipsTitle: "آی‌پی‌های تمیز",
   ipsSubtitle:
     "آدرس‌های جایگزین که در کنار دامنه اصلی به همه اشتراک‌ها اضافه می‌شوند.",
-  mainDomain: "دامنه اصلی (خودکار)",
+  gwTitle: "دامنه دروازه",
+  gwHint:
+    "هر کانفیگ تولیدشده به این دامنه روی پورت ۴۴۳ وصل می‌شود و باید پشت آن یک تونل واقعی VLESS/تروجان در حال اجرا باشد (LUFFY_PANEL یا اینباند متناظر Xray/sing-box). یک وب‌سایت معمولی روی پورت ۴۴۳ فقط «TCP پینگ» می‌دهد ولی هندشیک واقعی شکست می‌خورد — دقیقاً به همین دلیل کانفیگ‌ها پینگ می‌دهند اما وصل نمی‌شوند.",
+  gwPlaceholder: "vpn.example.com — خالی = هاست همین پنل",
+  gwSaved: "دروازه به‌روزرسانی شد — همه لینک‌ها بازسازی شدند",
+  gwReset: "دروازه به هاست همین پنل بازگشت",
+  gwInvalid: "دامنه نامعتبر است.",
   addIpPlaceholder: "ip-or-domain.example.com",
   addIp: "افزودن آدرس",
   ipInvalid: "قالب آدرس نامعتبر است.",
