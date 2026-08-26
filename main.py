@@ -959,15 +959,21 @@ def link_for_variant(link: dict, uid: str, auth: str, address: str = None, inclu
         alpn=variant.get("alpn"),
     )
 
-def links_for_all_variants(link: dict, uid: str, address: str = None) -> list[str]:
-    """برای هر auth فعال روی این لینک، یک share-link می‌سازه (ممکنه ۱ یا ۲ تا خروجی بده)."""
+def links_for_all_variants(link: dict, uid: str, address: str = None, first_done: list = None) -> list[str]:
+    """برای هر auth فعال روی این لینک، یک share-link می‌سازه (ممکنه ۱ یا ۲ تا خروجی بده).
+    اگه first_done (یه لیست تک‌عنصری) پاس داده بشه، فقط اولین share-link کل ساب
+    (بین همه آدرس‌ها) اطلاعات مصرف/انقضا رو توی اسمش می‌گیره."""
     out = []
-    first = True
     for auth in AUTH_TYPES:
-        share_link = link_for_variant(link, uid, auth, address=address, include_usage=first)
+        if first_done is not None:
+            include_usage = not first_done[0]
+        else:
+            include_usage = not out
+        share_link = link_for_variant(link, uid, auth, address=address, include_usage=include_usage)
         if share_link:
             out.append(share_link)
-            first = False
+            if first_done is not None:
+                first_done[0] = True
     return out
 
 def uptime() -> str:
@@ -2127,9 +2133,10 @@ def generate_landing_page(link: dict, uid: str, addresses: list[str]) -> str:
         if exp_dt:
             expiry_date_str = exp_dt.strftime("%d %b %Y").upper()
 
-    configs = links_for_all_variants(link, uid)
+    first_done = [False]
+    configs = links_for_all_variants(link, uid, first_done=first_done)
     for addr in addresses:
-        configs.extend(links_for_all_variants(link, uid, address=addr))
+        configs.extend(links_for_all_variants(link, uid, address=addr, first_done=first_done))
 
     # Sub URL for QR
     sub_url = f"https://{get_domain()}/sub/{uid}"
@@ -2789,9 +2796,10 @@ def generate_subscription_content(link: dict, uid: str, addresses: list[str]) ->
     sub_info_line = f'subscription-userinfo: "upload={int(used or 0)}; download=0; total={total_bytes}; expire={expire_ts}"'
     profile_title = f"NexoVIP-{link['label']}"
     
-    links_out = links_for_all_variants(link, uid)
+    first_done = [False]
+    links_out = links_for_all_variants(link, uid, first_done=first_done)
     for addr in addresses:
-        links_out.extend(links_for_all_variants(link, uid, address=addr))
+        links_out.extend(links_for_all_variants(link, uid, address=addr, first_done=first_done))
     
     # Body headers: v2RayTun and similar clients parse these from the
     # decoded body. Format: key: "value" (no # prefix, with quotes).
