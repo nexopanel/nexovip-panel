@@ -165,16 +165,17 @@ new_remark = '''    # Usage/expiry info only for the first config
     if include_usage:
         _used = link.get("used_bytes", 0) or 0
         _limit = link.get("limit_bytes", 0) or 0
-        _usage_txt = f"{_fmt_bytes(_used)} / {'\\u221e' if _limit == 0 else _fmt_bytes(_limit)}"
+        _inf = chr(8734)
+        _usage_txt = f"{_fmt_bytes(_used)} / {_inf if _limit == 0 else _fmt_bytes(_limit)}"
         _exp_raw = link.get("expires_at")
         _secs = seconds_until_expiry(_exp_raw)
         if _secs is None:
-            _exp_txt = "\\u221e"
+            _exp_txt = _inf
         elif _secs <= 0:
             _exp_txt = "Expired"
         else:
             _exp_txt = f"{_secs // 86400}d"
-        _remark = f"{link.get('label', '')} [\\U0001f4ca{_usage_txt} \\U0001f4c5{_exp_txt}]"
+        _remark = f"{link.get('label', '')} [📊{_usage_txt} 📅{_exp_txt}]"
     else:
         _remark = link.get('label', '')
     return generate_vless_link(
