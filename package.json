@@ -1,0 +1,5 @@
+{
+  "dependencies": {
+    "@vly-ai/integrations": "^0.6.13"
+  }
+}
