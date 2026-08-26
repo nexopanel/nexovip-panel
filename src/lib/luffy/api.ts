@@ -310,7 +310,14 @@ export const api = {
 
   // ── GET /api/links/{uid}/sub ─────────────────────────────────────────
   async getSubscription(uid: string): Promise<SubscriptionInfo> {
-    return (await this.getLinkView(uid)).subscription;
+    await ready();
+    const sub = publicSubscription(uid);
+    if (!sub) {
+      const err = new Error("link not found") as Error & { status?: number };
+      err.status = 404;
+      throw err;
+    }
+    return sub;
   },
 
   // ── POST /api/links ──────────────────────────────────────────────────
@@ -511,6 +518,15 @@ export const api = {
     emit();
   },
 };
+
+/** Public sub endpoint — mirrors LUFFY_PANEL's unauthenticated GET /sub/<uid> */
+export function publicSubscription(uid: string): SubscriptionInfo | null {
+  const link = getDb().links.find((l) => l.uuid === uid);
+  if (!link) return null;
+  const info = toView(link).subscription;
+  if (info.lines.length === 0) return null;
+  return info;
+}
 
 function buildCreatedMessage(row: LinkRow): string {
   const quota = row.limit_bytes > 0 ? formatBytesShort(row.limit_bytes) : "Unlimited";

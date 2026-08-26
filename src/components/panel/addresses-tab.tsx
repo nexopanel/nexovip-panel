@@ -13,6 +13,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { api, getDomain } from "@/lib/luffy/api";
+import { GatewayTools } from "@/components/panel/gateway-diagnostics";
 import { useI18n } from "@/lib/i18n";
 import {
   DownloadCloud,
@@ -97,6 +98,9 @@ export function AddressesTab({ addresses }: { addresses: string[] }) {
           <p className="text-xs leading-relaxed text-muted-foreground">{t("gwHint")}</p>
         </CardContent>
       </Card>
+
+      {/* Diagnostics + server-side config — why “TCP ping OK, real ping dead” */}
+      <GatewayTools domain={getDomain()} />
 
       {/* Add form */}
       <Card className="glass rounded-2xl">

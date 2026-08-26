@@ -15,6 +15,7 @@ const Landing = lazy(() => import("./pages/Landing.tsx"));
 const AuthPage = lazy(() => import("./pages/Auth.tsx"));
 const Dashboard = lazy(() => import("./pages/Dashboard.tsx"));
 const NotFound = lazy(() => import("./pages/NotFound.tsx"));
+const SubPage = lazy(() => import("./pages/SubPage.tsx"));
 
 // Simple loading fallback for route transitions
 function RouteLoading() {
@@ -73,6 +74,7 @@ createRoot(document.getElementById("root")!).render(
                   </RequireAuth>
                 }
               />
+              <Route path="/sub/:uid" element={<SubPage />} />
               <Route path="*" element={<NotFound />} />
             </Routes>
           </Suspense>

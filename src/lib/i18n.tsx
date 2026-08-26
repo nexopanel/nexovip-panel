@@ -206,6 +206,46 @@ const en = {
   passwordTooShort: "New password must be at least 4 characters.",
   passwordWrongCurrent: "Current password is incorrect.",
   sessionsInfo: "Sessions expire automatically after 7 days of issue.",
+
+  // Sub page (/sub/:uid)
+  subNotFound: "Subscription not found or expired.",
+  subHint:
+    "Paste this Base64 body into any V2Ray / Xray / sing-box client as subscription content.",
+
+  // Gateway diagnostics & server-side config
+  diagTitle: "Gateway diagnostics",
+  diagDesc: "Probes the gateway like a real client: TLS reach plus the tunnel handshake itself.",
+  diagRun: "Run diagnostics",
+  diagRunning: "Probing…",
+  diagHttpsRow: "HTTPS · TCP/TLS on 443",
+  diagTunnelRow: "Tunnel handshake · WebSocket upgrade",
+  diagSkipped: "Skipped — no WS config yet",
+  resOk: "Reachable",
+  resFail: "Unreachable",
+  resLive: "Handshake accepted",
+  resDead: "Rejected",
+  verdictLiveTitle: "Gateway looks healthy",
+  verdictLiveBody:
+    "TLS is terminated and a WebSocket tunnel accepted the handshake on the exact path clients dial. Real ping should succeed.",
+  verdictDeadTitle: "TCP ping yes, real ping no — the classic signature",
+  verdictDeadBody:
+    "The domain serves a regular website, not your VPN inbound. Deploy the server config below on that host (or point the gateway domain at a machine already running it), then re-run.",
+  verdictDownTitle: "Nothing answered on 443",
+  verdictDownBody:
+    "Check DNS records and firewall first — even TCP ping cannot get through.",
+  diagCdnNote:
+    "Note: some CDNs/proxies reject WebSocket upgrades; a “Rejected” result can also mean a blocked path rather than a missing inbound. Cross-check with a real client if in doubt.",
+  srvTitle: "Server-side Xray config",
+  srvDesc: "The matching backend for your links — run it on the gateway host behind TLS termination.",
+  srvOpen: "Open server config",
+  srvEmpty: "No active configurations yet — create one first.",
+  srvDownload: "Download",
+  srvClients: "clients aggregated",
+  tabXray: "Xray JSON",
+  srvBulletAgg:
+    "One inbound per protocol × transport aggregates every active config as a client (VLESS id / Trojan password = UUID).",
+  srvBulletEdge:
+    "TLS terminates at your edge (NGINX/Caddy/platform); Xray listens plaintext on internal ports and paths route by prefix.",
 };
 
 export type DictKey = keyof typeof en;
@@ -390,6 +430,43 @@ const fa: Record<DictKey, string> = {
   passwordTooShort: "رمز جدید باید حداقل ۴ کاراکتر باشد.",
   passwordWrongCurrent: "رمز عبور فعلی اشتباه است.",
   sessionsInfo: "نشست‌ها به‌طور خودکار پس از ۷ روز منقضی می‌شوند.",
+
+  subNotFound: "اشتراک یافت نشد یا منقضی شده است.",
+  subHint:
+    "این محتوای Base64 را در هر کلاینت V2Ray / Xray / sing-box به‌عنوان بدنه اشتراک وارد کنید.",
+
+  diagTitle: "عیب‌یابی دروازه",
+  diagDesc: "دروازه را مثل یک کلاینت واقعی می‌سنجد: دسترسی TLS به‌علاوه خود هندشیک تونل.",
+  diagRun: "اجرای عیب‌یابی",
+  diagRunning: "در حال بررسی…",
+  diagHttpsRow: "HTTPS · TCP/TLS روی پورت ۴۴۳",
+  diagTunnelRow: "هندشیک تونل · ارتقای WebSocket",
+  diagSkipped: "رد شد — هنوز کانفیگ WS ندارید",
+  resOk: "در دسترس",
+  resFail: "بی‌پاسخ",
+  resLive: "هندشیک پذیرفته شد",
+  resDead: "رد شد",
+  verdictLiveTitle: "دروازه سالم به‌نظر می‌رسد",
+  verdictLiveBody:
+    "TLS خاتمه می‌یابد و یک تونل WebSocket روی همان مسیری که کلاینت‌ها شماره می‌گیرند هندشیک را پذیرفت. پینگ واقعی باید جواب دهد.",
+  verdictDeadTitle: "TCP پینگ می‌دهد، پینگ واقعی نه — امضای کلاسیک",
+  verdictDeadBody:
+    "این دامنه یک وب‌سایت معمولی را سرو می‌کند، نه اینباند وی‌پی‌ان شما. کانفیگ سرور زیر را روی همان هاست اجرا کنید (یا دامنه دروازه را به ماشینی که آن را اجرا می‌کند اشاره دهید) و دوباره بررسی کنید.",
+  verdictDownTitle: "روی ۴۴۳ هیچ پاسخی نبود",
+  verdictDownBody: "اول رکورد DNS و فایروال را بررسی کنید — حتی TCP پینگ هم از آن عبور نمی‌کند.",
+  diagCdnNote:
+    "توجه: بعضی CDNها/پراکسی‌ها ارتقای WebSocket را رد می‌کنند؛ نتیجه «رد شد» گاهی یعنی مسیر بسته است نه نبودِ اینباند. در صورت شک با کلاینت واقعی هم بررسی کنید.",
+  srvTitle: "کانفیگ Xray سمت سرور",
+  srvDesc: "بک‌اند متناظر لینک‌های شما — آن را روی هاست دروازه پشت TLS اجرا کنید.",
+  srvOpen: "باز کردن کانفیگ سرور",
+  srvEmpty: "هنوز کانفیگ فعالی وجود ندارد — اول یکی بسازید.",
+  srvDownload: "دانلود",
+  srvClients: "کلاینت تجمیع شده",
+  tabXray: "Xray JSON",
+  srvBulletAgg:
+    "برای هر ترکیب پروتکل × ترنسپورت یک اینباند ساخته می‌شود و همه کانفیگ‌های فعال به‌عنوان کلاینت در آن جمع می‌شوند (شناسه VLESS / رمز تروجان = UUID).",
+  srvBulletEdge:
+    "TLS در لبه (NGINX/Caddy/پلتفرم) خاتمه می‌یابد؛ Xray روی پورت‌های داخلی بدون رمز گوش می‌دهد و مسیرها با پیشوند روت می‌شوند.",
 };
 
 interface I18nContextValue {
