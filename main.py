@@ -4886,7 +4886,22 @@ function fillRealityFields(p,r){
     }else{keys.style.display='none';keys.textContent='';}
   }
 }
-async function createLink(){async function createLink(){
+function readVariantFields(prefix,auth){
+  return {
+    [auth+'_enabled']: $m(prefix+'_'+auth+'_enabled').checked,
+    [auth+'_transport']: $m(prefix+'_'+auth+'_transport').value,
+    [auth+'_fingerprint']: $m(prefix+'_'+auth+'_fp').value,
+    [auth+'_alpn']: $m(prefix+'_'+auth+'_alpn').value,
+  };
+}
+function fillVariantFields(prefix,auth,variant){
+  $m(prefix+'_'+auth+'_enabled').checked=!!(variant&&variant.enabled);
+  $m(prefix+'_'+auth+'_transport').value=(variant&&variant.transport)||'ws';
+  $m(prefix+'_'+auth+'_fp').value=(variant&&variant.fingerprint)||'chrome';
+  $m(prefix+'_'+auth+'_alpn').value=(variant&&variant.alpn)||ALPN_DEFAULTS[auth+'-ws'];
+  toggleVariantBox(prefix,auth);
+}
+async function createLink(){
   const label=$m('nl').value.trim()||'New Link';
   if(!/^[a-zA-Z0-9\-_. ]+$/.test(label)){toast('Only English letters allowed',true);return}
   if(!$m('n_vless_enabled').checked && !$m('n_trojan_enabled').checked){toast('Enable at least one protocol (VLESS or Trojan)',true);return}
