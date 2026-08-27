@@ -104,9 +104,7 @@ async def _get_or_create_session(uid: str, auth: str, mode: str, session_id: str
 
         link = await _check_link_active(uid)
         variant = link.get("variants", {}).get(auth)
-        vt = variant.get("transport") if variant else None
-        # xhttp-auto accepts both packet-up and stream-up requests on the same path
-        if not variant or not variant.get("enabled") or vt not in (f"xhttp-{mode}", "xhttp-auto"):
+        if not variant or not variant.get("enabled") or variant.get("transport") != f"xhttp-{mode}":
             raise HTTPException(status_code=403, detail="not authorized")
         max_conn = link.get("max_connections", 0)
         if max_conn > 0 and await count_connections_for_link(uid) >= max_conn:
@@ -304,7 +302,7 @@ async def xhttp_downlink(auth: str, mode: str, uuid: str, session_id: str, reque
     ensure_reaper()
     if auth not in ("vless", "trojan"):
         raise HTTPException(status_code=404, detail="unknown auth")
-    if mode not in ("packet-up", "stream-up", "auto"):
+    if mode not in ("packet-up", "stream-up"):
         raise HTTPException(status_code=404, detail="unknown mode")
     ip = get_request_ip(request)
     sess = await _get_or_create_session(uuid, auth, mode, session_id, ip)
@@ -410,16 +408,3 @@ async def stream_up_upload(auth: str, uuid: str, session_id: str, request: Reque
         raise HTTPException(status_code=502, detail="stream error")
 
     return {"ok": True}
-
-
-# ══════════════════════════ XHTTP AUTO (هم‌مسیر، انتخاب خودکار مد) ══════════════════════════
-# در مد auto کلاینت خودش انتخاب می‌کنه که آپلود رو packet-up بفرسته یا stream-up؛
-# هر دو روی همون مسیر /auto/ سرو می‌شن و سشن مشترک باقی می‌مونه.
-@router.post("/xhttp/{auth}/auto/{uuid}/{session_id}/{seq}")
-async def auto_packet_up(auth: str, uuid: str, session_id: str, seq: int, request: Request):
-    return await packet_up_upload(auth, uuid, session_id, seq, request)
-
-
-@router.post("/xhttp/{auth}/auto/{uuid}/{session_id}")
-async def auto_stream_up(auth: str, uuid: str, session_id: str, request: Request):
-    return await stream_up_upload(auth, uuid, session_id, request)
