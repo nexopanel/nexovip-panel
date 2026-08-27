@@ -1,4 +1,31 @@
-# Logs
+# ── Python runtime ──────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# ── App data (generated at runtime) ────────────────────────────
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+secret.key
+xray-config.json
+xray-config.json.tmp
+xray-bin/
+
+# ── Freebuff/Vly template artifacts (auto-regenerated) ─────────
+node_modules/
+package.json
+bun.lock
+src/
+integrations.md
+dist/
+dist-ssr/
+*.local
+
+# ── Logs ────────────────────────────────────────────────────────
 logs
 *.log
 npm-debug.log*
@@ -7,12 +34,7 @@ yarn-error.log*
 bun-debug.log*
 lerna-debug.log*
 
-node_modules
-dist
-dist-ssr
-*.local
-
-# Editor directories and files
+# ── Editor / OS ────────────────────────────────────────────────
 .vscode/*
 !.vscode/extensions.json
 .idea
