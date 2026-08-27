@@ -44,12 +44,24 @@ SESSION_IDLE_TIMEOUT = 30
 REAPER_INTERVAL = 10
 TCP_CONNECT_TIMEOUT = 10.0
 DOWNLINK_QUEUE_MAX = 512
+# حداکثر پکت‌هایی که خارج از ترتیب برای یک سشن بافر می‌شن؛ اگه کلاینت/مهاجم
+# seqهای عمدی بفرسته، قدیمی‌ترین‌ها دور ریخته می‌شن تا حافظه بدون سقف رشد نکنه.
+SEQ_BUF_MAX = 64
+# سقف مجاز seq (۲۳۱-۱). مقادیر منفی یا غول‌پیکر معتبر نیستن و 400 می‌گیرن.
+SEQ_MAX = (1 << 31) - 1
+# سشنِ tcp_open ای که این‌قدر از آخرین فعالیتش گذشته باشه، زامبی حساب می‌شه و
+# reap می‌شه؛ در غیر این صورت اتصال‌های گمشده تا ری‌استارت پروسس «فعال» می‌مونن
+# و کاربر به سقف max_connections اشباع می‌رسه بدون اتصال واقعی.
+ZOMBIE_TCP_TIMEOUT = 600
 
 xhttp_sessions: dict = {}
 XHTTP_LOCK = asyncio.Lock()
 
 
 def _tune_socket(writer: asyncio.StreamWriter):
+    """TCP_NODELAY برای تأخیر پایین + TCP keepalive تا مرگ همتا (قطع شبکه،
+    kill شدن اپ) در سطح کِرنل چند دقیقه‌ای کشف بشه؛ وگرنه reader.read روی
+    سوکت مرده ساعت‌ها هنگ می‌کنه و سشن زامبی می‌مونه."""
     sock = writer.transport.get_extra_info("socket")
     if not sock:
         return
@@ -57,6 +69,21 @@ def _tune_socket(writer: asyncio.StreamWriter):
         sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
     except OSError:
         pass
+    try:
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
+    except OSError:
+        return
+    # فاصلهٔ probeها؛ اگر نگه‌داشتنی نبود (پلتفرم)، سوکت فقط با keepalive
+    # پیش‌فرض سیستم می‌مونه که بازهم بهتر از هیچی هست.
+    for opt, val in ((getattr(socket, 'TCP_KEEPIDLE', None), 60),
+                     (getattr(socket, 'TCP_KEEPINTVL', None), 15),
+                     (getattr(socket, 'TCP_KEEPCNT', None), 4)):
+        if opt is None:
+            continue
+        try:
+            sock.setsockopt(socket.IPPROTO_TCP, opt, val)
+        except OSError:
+            pass
 
 
 async def _check_link_active(uid: str) -> dict:
@@ -108,6 +135,19 @@ async def _get_or_create_session(uid: str, auth: str, mode: str, session_id: str
         return sess
 
 
+def _buffer_packet(sess: dict, seq: int, body: bytes):
+    """یک پکت خارج از ترتیب رو بافر می‌کنه؛ قبلش پکت‌های تکراری/دیرهنگامِ زیر
+    next_seq (که دیگه هیچ‌وقت درن نمی‌شن) و سرریز SEQ_BUF_MAX رو prune می‌کنه."""
+    buf = sess["seq_buf"]
+    nxt = sess["next_seq"]
+    if seq < nxt or seq in buf:
+        return  # retransmit/دوباره‌کاری — بی‌خطر دور انداختنه
+    buf[seq] = body
+    while len(buf) > SEQ_BUF_MAX:
+        oldest = min(buf)
+        del buf[oldest]
+
+
 async def _teardown(session_id: str):
     async with XHTTP_LOCK:
         sess = xhttp_sessions.pop(session_id, None)
@@ -136,9 +176,16 @@ async def _teardown(session_id: str):
                     link_ip_map.pop(uid, None)
     dq = sess.get("down_q")
     if dq:
+        # sentinel پایان (None) باید *همیشه* برسه، وگرنه استریم GET دانلینک
+        # تا ابد روی down_q.get() قفل می‌مونه. اگه صف پر باشه یک آیتم دستی
+        # خالی می‌کنیم تا جا باز شه (سشن داره نابود می‌شه، افت چانک عادیه).
+        try:
+            dq.get_nowait()
+        except asyncio.QueueEmpty:
+            pass
         try:
             dq.put_nowait(None)
-        except Exception:
+        except asyncio.QueueFull:
             pass
     if info:
         try:
@@ -160,7 +207,12 @@ async def _reaper():
         async with XHTTP_LOCK:
             stale = [sid for sid, s in xhttp_sessions.items()
                      if now - s["last_seen"] > SESSION_IDLE_TIMEOUT and not s.get("tcp_open")]
-        for sid in stale:
+            # سشن‌های tcp_open که خیلی وقته هیچ فعالیتی ندارن (کلاینت مرده ولی
+            # سوکت هنوز لباله) رو هم می‌بندیم؛ writer.close() باعث می‌شه pump
+            # task تمیز تموم بشه و connection/max_connections آزاد شن.
+            zombies = [sid for sid, s in xhttp_sessions.items()
+                       if now - s["last_seen"] > ZOMBIE_TCP_TIMEOUT]
+        for sid in stale + zombies:
             await _teardown(sid)
 
 
@@ -265,6 +317,8 @@ async def packet_up_upload(auth: str, uuid: str, session_id: str, seq: int, requ
     ensure_reaper()
     if auth not in ("vless", "trojan"):
         raise HTTPException(status_code=404, detail="unknown auth")
+    if seq < 0 or seq > SEQ_MAX:
+        raise HTTPException(status_code=400, detail="invalid sequence number")
     ip = get_request_ip(request)
     sess = await _get_or_create_session(uuid, auth, "packet-up", session_id, ip)
     if sess.get("closed"):
@@ -283,9 +337,9 @@ async def packet_up_upload(auth: str, uuid: str, session_id: str, seq: int, requ
     try:
         if sess["writer"] is None:
             # اولین پکت (شامل هدر VLESS/Trojan) ممکنه seq=0 نباشه اگه پکت‌ها خارج از
-            # ترتیب برسن؛ بافر کوچیک برای سورت‌کردن seqهای زودرس.
+            # ترتیب برسن؛ بافر کوچک محدود برای سورت‌کردن seqهای زودرس.
             if seq != 0:
-                sess["seq_buf"][seq] = body
+                _buffer_packet(sess, seq, body)
                 return {"ok": True, "buffered": True}
             await _open_tcp_for_session(session_id, uuid, sess, body)
             nxt = 1
@@ -304,7 +358,7 @@ async def packet_up_upload(auth: str, uuid: str, session_id: str, seq: int, requ
                 sess["writer"].write(pending)
                 sess["next_seq"] += 1
         else:
-            sess["seq_buf"][seq] = body
+            _buffer_packet(sess, seq, body)
 
         await sess["writer"].drain()
     except Exception as exc:
