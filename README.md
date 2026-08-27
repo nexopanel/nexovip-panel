@@ -39,6 +39,17 @@
 - 🩺 **Live gateway diagnostics** — probes TLS on 443 *and* the real tunnel
   WebSocket handshake, so you know a config will actually connect
 
+### 🤖 Automation & Analytics *(new)*
+- 🔮 **Usage forecast** — real-speed ETA per user (`≈3.2d left`) right in the table
+- 📅 **Persistent traffic history** — hourly (48h) + daily (30d) charts survive restarts
+- ⚙️ **Auto lifecycle** — auto-disable expired subs, auto-delete after N days,
+  monthly / 30-day usage reset cycles
+- ⚡ **Quick actions** — `+30d` and `↺ reset` directly on every row
+- 🧰 **Batch operations** — multi-select → activate / deactivate / reset / delete / **CSV export**,
+  plus one-click **batch create** (`Ali-1 … Ali-50`)
+- 🔐 **Telegram 2FA login** — 6-digit code on every sign-in (auto-fallback if the bot is offline)
+- 🖥️ **Session manager** — list active sessions + *logout everywhere* + new-IP login alerts
+
 ### 🌍 i18n & Design
 - 🇺🇸 **English** (LTR) ⇄ 🇮🇷 **فارسی** (RTL) — one-tap switch, fully translated
 - 🖤 **Black / Deep Red / Neon Red** theme with glassmorphism, glow effects,
@@ -140,6 +151,10 @@ Every config link is also a **subscription**: point any client at
 ---
 
 ## 📖 راهنمای فارسی
+
+> 🆕 **نسخهٔ ۳:** پیش‌بینی هوشمند پایان حجم، تاریخچهٔ دائمی ترافیک، چرخهٔ عمر خودکار
+> (غیرفعال‌سازی/حذف خودکار + ریست ماهانه)، عملیات گروهی با خروجی CSV، دکمه‌های سریع
+> `+30d` و `↺` روی هر ردیف، ورود دومرحله‌ای با کد تلگرام و مدیریت نشست‌های فعال.
 
 **نکسووی‌آی‌پی** یک پنل مدیریت و ساخت کانفیگ VPN حرفه‌ای است:
 

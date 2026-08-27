@@ -217,6 +217,10 @@ CONFIG = {
     "railway_token": "",
     "notify_connections": "0",
     "backup_interval_hours": "0",
+    "auto_disable": "0",
+    "auto_delete_days": "0",
+    "reset_cycle": "off",
+    "twofa": "0",
 }
 
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
@@ -230,6 +234,32 @@ stats = {"total_bytes": 0, "total_requests": 0, "total_errors": 0, "start_time":
 error_logs: deque = deque(maxlen=50)
 hourly_traffic: dict = defaultdict(int)
 daily_traffic: dict = defaultdict(int)
+
+# ── v3: usage sampling / forecast / 2FA pending state ────────────────────
+_usage_samples: dict = defaultdict(list)   # uid -> [(bucket_ts, used_bytes)]
+_last_sample_ts: float = 0.0
+_twofa_pending: dict = {}                  # code_hash -> {expires, ip, attempts}
+_known_login_ips: set = set()
+
+def _forecast_for(uid: str, limit_bytes: int, used_bytes: int):
+    """ETA تا پایان حجم بر اساس سرعت مصرف واقعی (پنجرهٔ نمونه‌های ۴۸ ساعت)."""
+    if not limit_bytes or limit_bytes <= 0 or used_bytes >= limit_bytes:
+        return None
+    hist = _usage_samples.get(uid) or []
+    if len(hist) < 2:
+        return None
+    (t0, u0), (t1, u1) = hist[0], hist[-1]
+    dt = t1 - t0
+    if dt < 1800:  # کمتر از ۳۰ دقیقه داده → پیش‌بینی معنادار نیست
+        return None
+    speed = (u1 - u0) / float(dt)  # bytes/sec
+    if speed <= 0:
+        return {"days_left": None, "mb_per_day": 0.0}
+    remaining = limit_bytes - used_bytes
+    return {
+        "days_left": round(remaining / speed / 86400.0, 1),
+        "mb_per_day": round(speed * 86400.0 / (1024.0 * 1024.0), 1),
+    }
 http_client: httpx.AsyncClient | None = None
 
 LINKS: dict = {}
@@ -624,6 +654,20 @@ def init_db():
             latest_url TEXT,
             checked_at REAL
         );
+        CREATE TABLE IF NOT EXISTS traffic_hourly (
+            hk TEXT PRIMARY KEY,
+            rx INTEGER DEFAULT 0
+        );
+        CREATE TABLE IF NOT EXISTS traffic_daily (
+            dk TEXT PRIMARY KEY,
+            rx INTEGER DEFAULT 0
+        );
+        CREATE TABLE IF NOT EXISTS usage_samples (
+            uid TEXT NOT NULL,
+            ts INTEGER NOT NULL,
+            used_bytes INTEGER DEFAULT 0,
+            PRIMARY KEY (uid, ts)
+        );
     """)
     conn.commit()
     # Migrate older DBs created before protocol/fingerprint/alpn/port existed
@@ -636,6 +680,15 @@ def init_db():
         ("variants_json", "ALTER TABLE links ADD COLUMN variants_json TEXT DEFAULT ''"),
     ):
         if col not in existing_cols:
+            conn.execute(ddl)
+    # v3: ستون‌های مدیریت نشست‌ها (لیست نشست‌ها + خروج از همه‌جا)
+    sess_cols = {row["name"] for row in conn.execute("PRAGMA table_info(sessions)").fetchall()}
+    for col, ddl in (
+        ("ip", "ALTER TABLE sessions ADD COLUMN ip TEXT DEFAULT ''"),
+        ("ua", "ALTER TABLE sessions ADD COLUMN ua TEXT DEFAULT ''"),
+        ("created_at", "ALTER TABLE sessions ADD COLUMN created_at REAL DEFAULT 0"),
+    ):
+        if col not in sess_cols:
             conn.execute(ddl)
     conn.commit()
     # Ensure default auth row
@@ -723,8 +776,9 @@ async def save_db():
                 for addr in CUSTOM_ADDRESSES:
                     conn.execute("INSERT INTO custom_addresses (address) VALUES (?)", (addr,))
             # Save settings
-            for key in ("telegram_token", "telegram_admin_id", "bot_lang", "railway_token", "notify_connections", "backup_interval_hours"):
+            for key in ("telegram_token", "telegram_admin_id", "bot_lang", "railway_token", "notify_connections", "backup_interval_hours", "auto_disable", "auto_delete_days", "reset_cycle", "twofa", "_last_reset_key"):
                 conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)", (key, CONFIG.get(key, "")))
+            conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('_known_login_ips', ?)", (json.dumps(sorted(_known_login_ips))[:60000],))
             conn.commit()
     except Exception as e:
         logger.error(f"Error saving DB: {e}")
@@ -791,11 +845,14 @@ def hash_password(pw: str) -> str:
 AUTH = {"password_hash": hash_password("admin")}
 
 
-async def create_session() -> str:
+async def create_session(ip: str = "", ua: str = "") -> str:
     token = secrets.token_urlsafe(32)
     conn = get_db()
     try:
-        conn.execute("INSERT INTO sessions (token, expires_at) VALUES (?, ?)", (token, time.time() + SESSION_TTL))
+        conn.execute(
+            "INSERT INTO sessions (token, expires_at, ip, ua, created_at) VALUES (?, ?, ?, ?, ?)",
+            (token, time.time() + SESSION_TTL, (ip or "")[:64], (ua or "")[:200], time.time()),
+        )
         conn.commit()
     finally:
         conn.close()
@@ -851,6 +908,141 @@ async def keep_alive():
         except Exception:
             pass
 
+def _flush_traffic_to_db():
+    """دادهٔ ترافیک حافظه → SQLite (دائمی می‌ماند حتی بعد از ری‌استارت)."""
+    conn = get_db()
+    try:
+        for k, v in list(hourly_traffic.items()):
+            conn.execute("INSERT OR REPLACE INTO traffic_hourly (hk, rx) VALUES (?, ?)", (k, int(v)))
+        for k, v in list(daily_traffic.items()):
+            conn.execute("INSERT OR REPLACE INTO traffic_daily (dk, rx) VALUES (?, ?)", (k, int(v)))
+        now = datetime.now(timezone.utc)
+        conn.execute("DELETE FROM traffic_hourly WHERE hk < ?", ((now - timedelta(hours=48)).strftime("%Y-%m-%d %H:00"),))
+        conn.execute("DELETE FROM traffic_daily WHERE dk < ?", ((now - timedelta(days=35)).strftime("%Y-%m-%d"),))
+        conn.commit()
+    except Exception as e:
+        logger.error(f"flush_traffic: {e}")
+    finally:
+        conn.close()
+
+async def _sample_usage(now_ts: float):
+    """نمونه‌گیری مصرف هر کاربر هر ۵ دقیقه → پایهٔ پیش‌بینی پایان حجم."""
+    bucket = int(now_ts // 300 * 300)
+    cutoff = bucket - 48 * 3600
+    async with LINKS_LOCK:
+        items = [(uid, int(l.get("used_bytes", 0))) for uid, l in LINKS.items()]
+    conn = get_db()
+    try:
+        for uid, used in items:
+            hist = _usage_samples[uid]
+            if hist and hist[-1][0] == bucket:
+                hist[-1] = (bucket, used)
+            else:
+                hist.append((bucket, used))
+            while len(hist) > 96:
+                hist.pop(0)
+            conn.execute("INSERT OR REPLACE INTO usage_samples (uid, ts, used_bytes) VALUES (?, ?, ?)", (uid, bucket, used))
+            conn.execute("DELETE FROM usage_samples WHERE uid = ? AND ts < ?", (uid, cutoff))
+        conn.commit()
+    except Exception as e:
+        logger.error(f"sample_usage: {e}")
+    finally:
+        conn.close()
+
+async def _run_lifecycle():
+    """غیرفعال‌سازی/حذف خودکار منقضی‌ها + ریست دوره‌ای حجم."""
+    now = datetime.now(timezone.utc)
+    auto_dis = CONFIG.get("auto_disable", "0") == "1"
+    try:
+        del_days = int(float(CONFIG.get("auto_delete_days") or 0))
+    except (TypeError, ValueError):
+        del_days = 0
+    to_delete: list = []
+    changed = False
+    async with LINKS_LOCK:
+        for uid, l in list(LINKS.items()):
+            exp = parse_expires_at(l.get("expires_at"))
+            if exp is None or exp >= now:
+                continue
+            if auto_dis and l["active"]:
+                l["active"] = False
+                changed = True
+                key = f"autodis_{uid}"
+                if key not in notified_uids:
+                    notified_uids.add(key)
+                    await create_notification(type="expiry", title=f"Auto-disabled: {l['label']}",
+                                              message="Subscription expired and was disabled automatically.")
+                    await send_tg_message(f"⛔ <b>Auto-disabled</b>: {html.escape(l['label'])}")
+            if del_days > 0 and (now - exp).days >= del_days:
+                to_delete.append(uid)
+        # ریست دوره‌ای حجم
+        rc = CONFIG.get("reset_cycle", "off")
+        if rc in ("monthly", "30d"):
+            cur_key = now.strftime("%Y-%m") if rc == "monthly" else str(int(now.timestamp()) // (30 * 86400))
+            if CONFIG.get("_last_reset_key", "") != cur_key:
+                for l in LINKS.values():
+                    l["used_bytes"] = 0
+                CONFIG["_last_reset_key"] = cur_key
+                changed = True
+                await create_notification(type="info", title="Usage reset",
+                                          message=f"Cycle {rc}: all usage counters reset.")
+                await send_tg_message(f"🔄 <b>Usage reset</b> (cycle: {rc}) — all counters zeroed")
+    if to_delete:
+        for uid in to_delete:
+            lbl = LINKS.get(uid, {}).get("label", uid[:8])
+            async with LINKS_LOCK:
+                LINKS.pop(uid, None)
+            await close_connections_for_link(uid)
+            await create_notification(type="expiry", title=f"Auto-deleted: {lbl}",
+                                      message=f"Expired {del_days}+ days ago and was removed automatically.")
+            await send_tg_message(f"🗑 <b>Auto-deleted</b>: {html.escape(lbl)}")
+        changed = True
+    if changed:
+        await save_db()
+
+def restore_v3_state():
+    """بعد از ری‌استارت: ترافیک و نمونه‌های مصرف از دیتابیس برمی‌گردند."""
+    try:
+        conn = get_db()
+        try:
+            for row in conn.execute("SELECT hk, rx FROM traffic_hourly"):
+                k, v = row["hk"], int(row["rx"])
+                if hourly_traffic.get(k, 0) < v:
+                    hourly_traffic[k] = v
+            for row in conn.execute("SELECT dk, rx FROM traffic_daily"):
+                k, v = row["dk"], int(row["rx"])
+                if daily_traffic.get(k, 0) < v:
+                    daily_traffic[k] = v
+            for row in conn.execute("SELECT uid, ts, used_bytes FROM usage_samples ORDER BY ts"):
+                _usage_samples[row["uid"]].append((int(row["ts"]), int(row["used_bytes"])))
+            row = conn.execute("SELECT value FROM settings WHERE key = '_known_login_ips'").fetchone()
+            if row:
+                try:
+                    _known_login_ips.update(json.loads(row["value"]))
+                except Exception:
+                    pass
+        finally:
+            conn.close()
+    except Exception as e:
+        logger.error(f"restore_v3_state: {e}")
+
+async def maintenance_cron():
+    """هر ۶۰ ثانیه: flush ترافیک؛ هر ۵ دقیقه: نمونه‌گیری + چرخهٔ عمر خودکار."""
+    global _last_sample_ts
+    while True:
+        try:
+            await asyncio.sleep(60)
+            _flush_traffic_to_db()
+            now = time.time()
+            if now - _last_sample_ts >= 300:
+                _last_sample_ts = now
+                await _sample_usage(now)
+                await _run_lifecycle()
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:
+            logger.error(f"maintenance_cron: {e}")
+
 @app.on_event("startup")
 async def startup():
     global http_client
@@ -865,6 +1057,8 @@ async def startup():
     await restart_telegram_bot()
     asyncio.create_task(telegram_notifier_cron())
     asyncio.create_task(backup_cron())
+    restore_v3_state()
+    asyncio.create_task(maintenance_cron())
     await ensure_default_link()
 
 @app.on_event("shutdown")
@@ -1717,6 +1911,63 @@ async def _rl_clear(ip: str):
     async with _login_rl_lock:
         _login_rl_state.pop(ip, None)
 
+def _hash_code(code: str) -> str:
+    return hashlib.sha256(f"{code}{CONFIG['secret']}".encode()).hexdigest()
+
+async def _tg_send_ok(text: str) -> bool:
+    """ارسال با تأیید تحویل — برای ۲FA لازمه تا ادمین قفل نشه."""
+    global bot
+    admin_id = CONFIG.get("telegram_admin_id")
+    if not (bot and admin_id):
+        return False
+    try:
+        await bot.send_message(admin_id, text, parse_mode="HTML")
+        return True
+    except Exception as e:
+        logger.error(f"tg_send_ok: {e}")
+        return False
+
+async def _twofa_issue(ip: str) -> bool:
+    """کد ۶ رقمی می‌سازد و به تلگرام می‌فرستد. False = ارسال نشد → ورود تک‌مرحله‌ای."""
+    code = f"{secrets.randbelow(1000000):06d}"
+    sent = await _tg_send_ok(
+        f"🔐 <b>NexoVIP — کد ورود دومرحله‌ای</b>\n"
+        f"IP: <code>{html.escape(ip)}</code>\n"
+        f"Code: <code><b>{code}</b></code>\n"
+        f"(10 minutes)"
+    )
+    if not sent:
+        return False
+    _twofa_pending.clear()
+    _twofa_pending[_hash_code(code)] = {"expires": time.time() + 600, "ip": ip, "attempts": 0}
+    return True
+
+async def _twofa_verify(code: str, ip: str) -> bool:
+    h = _hash_code(str(code or "").strip())
+    rec = _twofa_pending.get(h)
+    if not rec or rec["expires"] < time.time() or rec.get("ip") != ip:
+        return False
+    if rec.get("attempts", 0) >= 5:
+        _twofa_pending.pop(h, None)
+        return False
+    _twofa_pending.pop(h, None)
+    return True
+
+async def _complete_login(request: Request, ip: str):
+    """ساخت نشست + کوکی + نوتیف تلگرام (با هشدار آی‌پی جدید)."""
+    ua = str(request.headers.get("user-agent", ""))[:200]
+    token = await create_session(ip=ip, ua=ua)
+    resp = JSONResponse({"ok": True})
+    resp.set_cookie(key=SESSION_COOKIE, value=token, max_age=SESSION_TTL, httponly=True, samesite="lax", path="/")
+    if ip and ip not in _known_login_ips and ip != "127.0.0.1":
+        is_new = bool(_known_login_ips)
+        _known_login_ips.add(ip)
+        await save_db()
+        if is_new:
+            await send_tg_message(f"🆕 <b>ورود از آی‌پی جدید</b>\nIP: <code>{html.escape(ip)}</code>")
+    await send_tg_message(f"🟢 <b>ورود ادمین به پنل</b>\nIP: <code>{html.escape(ip)}</code>")
+    return resp
+
 @app.post("/api/login")
 async def api_login(request: Request):
     body = await request.json()
@@ -1728,11 +1979,22 @@ async def api_login(request: Request):
         await send_tg_message(f"⚠️ <b>تلاش ناموفق برای ورود به پنل</b>\nIP: <code>{html.escape(ip)}</code>")
         raise HTTPException(status_code=401, detail="Invalid password")
     await _rl_clear(ip)
-    token = await create_session()
-    resp = JSONResponse({"ok": True})
-    resp.set_cookie(key=SESSION_COOKIE, value=token, max_age=SESSION_TTL, httponly=True, samesite="lax", path="/")
-    await send_tg_message(f"🟢 <b>ورود ادمین به پنل</b>\nIP: <code>{html.escape(ip)}</code>")
-    return resp
+    # v3: ورود دومرحله‌ای — اگر ربات در دسترس بود کد بفرست، وگرنه ورود عادی
+    if CONFIG.get("twofa") == "1" and await _twofa_issue(ip):
+        return JSONResponse({"ok": False, "twofa": True})
+    return await _complete_login(request, ip)
+
+@app.post("/api/login/verify")
+async def api_login_verify(request: Request):
+    body = await request.json()
+    code = str(body.get("code") or "").strip()
+    ip = get_request_ip(request)
+    await _rl_precheck(ip)
+    if not await _twofa_verify(code, ip):
+        await _rl_fail(ip)
+        raise HTTPException(status_code=401, detail="Invalid or expired code")
+    await _rl_clear(ip)
+    return await _complete_login(request, ip)
 
 @app.post("/api/logout")
 async def api_logout(request: Request):
@@ -1791,6 +2053,10 @@ async def get_settings(_=Depends(require_auth)):
         "railway_token": CONFIG.get("railway_token", ""),
         "notify_connections": CONFIG.get("notify_connections", "0") in ("1", "true", "True", True),
         "backup_interval_hours": CONFIG.get("backup_interval_hours", "0"),
+        "auto_disable": CONFIG.get("auto_disable", "0") == "1",
+        "auto_delete_days": int(CONFIG.get("auto_delete_days", "0") or 0),
+        "reset_cycle": CONFIG.get("reset_cycle", "off"),
+        "twofa": CONFIG.get("twofa", "0") == "1",
     }
 
 @app.post("/api/settings")
@@ -1813,6 +2079,19 @@ async def update_settings(request: Request, _=Depends(require_auth)):
         except (TypeError, ValueError):
             iv = 0
         CONFIG["backup_interval_hours"] = str(max(0, min(iv, 168)))
+    if "auto_disable" in body:
+        CONFIG["auto_disable"] = "1" if body.get("auto_disable") else "0"
+    if "auto_delete_days" in body:
+        try:
+            _d = int(body.get("auto_delete_days") or 0)
+        except (TypeError, ValueError):
+            _d = 0
+        CONFIG["auto_delete_days"] = str(max(0, min(_d, 365)))
+    if "reset_cycle" in body:
+        _rc = str(body.get("reset_cycle") or "off")
+        CONFIG["reset_cycle"] = _rc if _rc in ("off", "monthly", "30d") else "off"
+    if "twofa" in body:
+        CONFIG["twofa"] = "1" if body.get("twofa") else "0"
     await save_db()
     await restart_telegram_bot()
     return {"ok": True}
@@ -2227,6 +2506,7 @@ async def list_links(_=Depends(require_auth)):
             "variants": sanitize_variants(data.get("variants")),
             "port": data.get("port", DEFAULT_PORT),
             "current_connections": await count_connections_for_link(uid),
+            "forecast": _forecast_for(uid, data["limit_bytes"], data["used_bytes"]),
             "vless_links": links_for_all_variants(data, uid),
         })
     result.sort(key=lambda x: x["created_at"], reverse=True)
@@ -2259,6 +2539,18 @@ async def toggle_link(uid: str, request: Request, _=Depends(require_auth)):
             LINKS[uid]["variants"] = variants_from_body(body, base=sanitize_variants(LINKS[uid].get("variants")))
         # پورت همیشه 443 است — دیگه از ورودی کاربر خونده نمی‌شه
         LINKS[uid]["port"] = DEFAULT_PORT
+        if "extend_days" in body:
+            try:
+                _ed = int(body["extend_days"])
+            except (TypeError, ValueError):
+                _ed = 0
+            if _ed > 0:
+                _now = datetime.now(timezone.utc)
+                _base = parse_expires_at(LINKS[uid].get("expires_at"))
+                if _base is None or _base < _now:
+                    _base = _now
+                LINKS[uid]["expires_at"] = (_base + timedelta(days=_ed)).isoformat()
+                notified_uids.discard(f"expiry_{uid}")
         if "days_valid" in body:
             try:
                 dv = int(body["days_valid"])
@@ -2271,6 +2563,152 @@ async def toggle_link(uid: str, request: Request, _=Depends(require_auth)):
                 pass
     await save_db()
     return {"ok": True}
+
+@app.post("/api/links/bulk")
+async def bulk_links(request: Request, _=Depends(require_auth)):
+    body = await request.json()
+    action = body.get("action")
+    uids = [str(u) for u in (body.get("uids") or [])][:500]
+    if action not in ("activate", "deactivate", "reset", "delete"):
+        raise HTTPException(status_code=400, detail="invalid action")
+    if not uids:
+        return {"ok": True, "affected": 0}
+    affected = 0
+    for uid in uids:
+        if action == "delete":
+            async with LINKS_LOCK:
+                existed = LINKS.pop(uid, None) is not None
+            if existed:
+                affected += 1
+                await close_connections_for_link(uid)
+            continue
+        async with LINKS_LOCK:
+            l = LINKS.get(uid)
+            if l is None:
+                continue
+            if action == "activate":
+                l["active"] = True
+            elif action == "deactivate":
+                l["active"] = False
+            elif action == "reset":
+                l["used_bytes"] = 0
+            notified_uids.discard(f"quota_{uid}")
+            affected += 1
+    await save_db()
+    return {"ok": True, "affected": affected}
+
+@app.post("/api/links/batch")
+async def batch_create_links(request: Request, _=Depends(require_auth)):
+    body = await request.json()
+    base = (body.get("base_label") or "User").strip()[:40]
+    if not re.match(r'^[a-zA-Z0-9\-_. ]+$', base):
+        raise HTTPException(status_code=400, detail="Invalid base name")
+    try:
+        count = int(body.get("count") or 0)
+    except (TypeError, ValueError):
+        count = 0
+    count = max(1, min(count, 100))
+    try:
+        limit_value = float(body.get("limit_value") or 0)
+    except (TypeError, ValueError):
+        limit_value = 0
+    limit_unit = body.get("limit_unit") or "GB"
+    limit_bytes = 0 if limit_value <= 0 else parse_size_to_bytes(limit_value, limit_unit)
+    try:
+        mc = int(body.get("max_connections") or 0)
+    except (TypeError, ValueError):
+        mc = 0
+    try:
+        dv = int(body.get("days_valid") or 0)
+    except (TypeError, ValueError):
+        dv = 0
+    expires_at = (datetime.now(timezone.utc) + timedelta(days=dv)).isoformat() if dv > 0 else None
+    proto = str(body.get("protocol") or DEFAULT_PROTOCOL)
+    variants = variants_from_legacy(proto, DEFAULT_FINGERPRINT, "")
+    created = 0
+    async with LINKS_LOCK:
+        existing = {v["label"] for v in LINKS.values()}
+    for i in range(1, count + 1):
+        label = f"{base}-{i}"
+        n = i
+        while label in existing:
+            n += 1
+            label = f"{base}-{n}"
+        existing.add(label)
+        uid = str(uuid.uuid4())
+        async with LINKS_LOCK:
+            LINKS[uid] = {
+                "label": label,
+                "limit_bytes": limit_bytes,
+                "used_bytes": 0,
+                "max_connections": mc if mc >= 0 else 0,
+                "created_at": datetime.now(timezone.utc).isoformat(),
+                "active": True,
+                "expires_at": expires_at,
+                "variants": variants,
+                "port": DEFAULT_PORT,
+            }
+        created += 1
+    await save_db()
+    return {"ok": True, "created": created}
+
+@app.get("/api/traffic/history")
+async def traffic_history(_=Depends(require_auth)):
+    now = datetime.now(timezone.utc)
+    cutoff_h = (now - timedelta(hours=48)).strftime("%Y-%m-%d %H:00")
+    cutoff_d = (now - timedelta(days=30)).strftime("%Y-%m-%d")
+    hourly: dict = {}
+    daily: dict = {}
+    conn = get_db()
+    try:
+        for row in conn.execute("SELECT hk, rx FROM traffic_hourly WHERE hk >= ? ORDER BY hk", (cutoff_h,)):
+            hourly[row["hk"]] = int(row["rx"])
+        for row in conn.execute("SELECT dk, rx FROM traffic_daily WHERE dk >= ? ORDER BY dk", (cutoff_d,)):
+            daily[row["dk"]] = int(row["rx"])
+    finally:
+        conn.close()
+    # دادهٔ لحظه‌ای حافظه (تازه‌تر از آخرین flush) ادغام می‌شود
+    for k, v in hourly_traffic.items():
+        if k >= cutoff_h:
+            hourly[k] = max(hourly.get(k, 0), int(v))
+    for k, v in daily_traffic.items():
+        if k >= cutoff_d:
+            daily[k] = max(daily.get(k, 0), int(v))
+    return {"hourly": dict(sorted(hourly.items())[-48:]), "daily": dict(sorted(daily.items())[-30:])}
+
+@app.get("/api/sessions")
+async def list_sessions(request: Request, _=Depends(require_auth)):
+    current = request.cookies.get(SESSION_COOKIE)
+    conn = get_db()
+    out = []
+    try:
+        for row in conn.execute(
+            "SELECT token, ip, ua, created_at, expires_at FROM sessions WHERE expires_at >= ? ORDER BY created_at DESC",
+            (time.time(),),
+        ):
+            out.append({
+                "current": row["token"] == current,
+                "ip": row["ip"] or "-",
+                "ua": (row["ua"] or "")[:60],
+                "created_min_ago": max(0, int((time.time() - (row["created_at"] or time.time())) // 60)),
+                "expires_min": max(0, int(((row["expires_at"] or 0) - time.time()) // 60)),
+            })
+    finally:
+        conn.close()
+    return {"sessions": out}
+
+@app.post("/api/sessions/logout-all")
+async def logout_all_sessions(request: Request, _=Depends(require_auth)):
+    current = request.cookies.get(SESSION_COOKIE)
+    conn = get_db()
+    try:
+        cur = conn.execute("DELETE FROM sessions WHERE token != ?", (current or "",))
+        conn.commit()
+        n = cur.rowcount
+    finally:
+        conn.close()
+    await send_tg_message(f"🚪 <b>Logout-all</b>: {n} session(s) terminated")
+    return {"ok": True, "terminated": n}
 
 @app.delete("/api/links/{uid}")
 async def delete_link(uid: str, _=Depends(require_auth)):
@@ -4218,6 +4656,14 @@ body{background:radial-gradient(circle at 78% -8%,rgba(255,36,72,.12),transparen
       </div>
       <button class="btn btn-gold" onclick="doLogin()" style="width:100%;justify-content:center;padding:12px;margin-top:6px">LOGIN</button>
       <div id="login-err" style="color:var(--red);font-size:12px;margin-top:10px;text-align:center;display:none">Invalid password</div>
+      <div id="lg-2fa" style="display:none;margin-top:14px">
+        <div class="fg">
+          <label class="fl" data-en="TELEGRAM CODE" data-fa="کد تلگرام">TELEGRAM CODE</label>
+          <input class="fi" id="lg-code" inputmode="numeric" maxlength="6" placeholder="••••••" style="text-align:center;letter-spacing:8px;font-size:18px" onkeydown="if(event.key==='Enter')verify2fa()">
+        </div>
+        <button class="btn btn-gold" onclick="verify2fa()" style="width:100%;justify-content:center;padding:12px;margin-top:6px" data-en="VERIFY" data-fa="تأیید">VERIFY</button>
+        <div style="color:var(--text3);font-size:11px;margin-top:8px;text-align:center" data-en="6-digit code sent to your Telegram" data-fa="کد ۶ رقمی به تلگرامت ارسال شد">6-digit code sent to your Telegram</div>
+      </div>
     </div>
   </div>
 </div>
@@ -4431,7 +4877,10 @@ body{background:radial-gradient(circle at 78% -8%,rgba(255,36,72,.12),transparen
           <div class="page-title" data-en="Inbounds" data-fa="اینباندها">Inbounds</div>
           <div class="page-sub" data-en="VLESS over WebSocket · TLS" data-fa="VLESS روی WebSocket با TLS">VLESS over WebSocket · TLS</div>
         </div>
-        <button class="btn btn-gold" onclick="showAddMo()" data-en="+ Add" data-fa="+ افزودن">+ Add</button>
+        <div style="display:flex;gap:8px">
+          <button class="btn btn-ghost" onclick="showBatchMo()" data-en="⚡ Batch" data-fa="⚡ گروهی">⚡ Batch</button>
+          <button class="btn btn-gold" onclick="showAddMo()" data-en="+ Add" data-fa="+ افزودن">+ Add</button>
+        </div>
       </div>
       <div class="tb">
         <div class="search-wrap">
@@ -4444,10 +4893,21 @@ body{background:radial-gradient(circle at 78% -8%,rgba(255,36,72,.12),transparen
           <button class="chip" data-filter="off" onclick="setFilter('off',this)" data-en="Off" data-fa="غیرفعال">Off</button>
         </div>
       </div>
+      <div id="bulk-bar" style="display:none;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:10px;padding:10px 12px;border:1px solid rgba(239,42,58,.35);border-radius:12px;background:rgba(239,42,58,.06)">
+        <span id="bulk-count" style="font-size:12px;font-weight:800;color:var(--red)">0</span>
+        <span style="font-size:11px;color:var(--text3)" data-en="selected" data-fa="انتخاب‌شده">selected</span>
+        <span style="flex:1"></span>
+        <button class="btn btn-ghost btn-sm" onclick="bulkAction('activate')" data-en="Activate" data-fa="فعال‌سازی">Activate</button>
+        <button class="btn btn-ghost btn-sm" onclick="bulkAction('deactivate')" data-en="Deactivate" data-fa="غیرفعال">Deactivate</button>
+        <button class="btn btn-ghost btn-sm" onclick="bulkAction('reset')" data-en="Reset usage" data-fa="ریست حجم">Reset usage</button>
+        <button class="btn btn-ghost btn-sm" onclick="exportCSV()" data-en="⬇ CSV" data-fa="⬇ CSV">⬇ CSV</button>
+        <button class="btn btn-danger btn-sm" onclick="bulkAction('delete')" data-en="Delete" data-fa="حذف">Delete</button>
+      </div>
       <div class="card" style="padding:0;overflow:hidden">
         <div class="tbl-wrap">
           <table class="tbl">
             <thead><tr>
+              <th style="width:26px"><input type="checkbox" id="selall" onchange="toggleSelectAll(this)" style="accent-color:var(--red);cursor:pointer"></th>
               <th>#</th>
               <th data-en="Name" data-fa="نام">Name</th>
               <th data-en="Type" data-fa="نوع">Type</th>
@@ -4478,6 +4938,13 @@ body{background:radial-gradient(circle at 78% -8%,rgba(255,36,72,.12),transparen
           <div class="card-hd"><div class="card-title" data-en="Inbound Traffic Share" data-fa="سهم ترافیک کاربران">Inbound Traffic Share</div></div>
           <div class="chart-container"><canvas id="inbound-chart"></canvas></div>
         </div>
+      </div>
+      <div class="card">
+        <div class="card-hd">
+          <div class="card-title" data-en="📅 7-Day History" data-fa="📅 تاریخچهٔ ۷ روز">📅 7-Day History</div>
+          <span id="th-total" style="font-size:11px;color:var(--text3)">-</span>
+        </div>
+        <div class="chart-container" style="height:200px"><canvas id="hist-chart"></canvas></div>
       </div>
     </section>
 
@@ -4553,6 +5020,37 @@ body{background:radial-gradient(circle at 78% -8%,rgba(255,36,72,.12),transparen
           </label>
         </div>
       </div>
+      <div class="card" style="margin-top:14px;border:1px solid rgba(239,42,58,.25)">
+        <div class="card-hd"><div class="card-title" data-en="⚙ Automation" data-fa="⚙ اتوماسیون">⚙ Automation</div></div>
+        <div style="font-size:11px;color:var(--text3);margin-bottom:12px;line-height:1.6" data-en="Expired subscriptions are disabled or deleted automatically, and usage can reset every cycle. Telegram 2FA adds a login code on every sign-in." data-fa="ساب‌های منقضی به‌صورت خودکار غیرفعال یا حذف می‌شوند و حجم در هر سیکل ریست می‌شود. ورود دومرحله‌ای تلگرام روی هر ورود کد می‌خواهد.">Expired subscriptions are handled automatically.</div>
+        <div style="display:flex;flex-direction:column;gap:10px">
+          <label style="display:flex;align-items:center;gap:8px;font-size:12px;cursor:pointer">
+            <input type="checkbox" id="lc-disable" style="accent-color:var(--red)">
+            <span data-en="Auto-disable expired subscriptions" data-fa="غیرفعال‌سازی خودکار ساب‌های منقضی">Auto-disable expired subscriptions</span>
+          </label>
+          <label style="display:flex;align-items:center;gap:8px;font-size:12px;cursor:pointer">
+            <input type="checkbox" id="lc-twofa" style="accent-color:var(--red)">
+            <span data-en="Telegram 2FA login" data-fa="ورود دومرحله‌ای با کد تلگرام">Telegram 2FA login</span>
+          </label>
+          <div class="fr">
+            <div class="fg"><label class="fl" data-en="Auto-delete after (days, 0=off)" data-fa="حذف خودکار بعد از (روز، ۰=خاموش)">Auto-delete after (days)</label><input class="fi" id="lc-del" type="number" min="0" max="365" value="0"></div>
+            <div class="fg"><label class="fl" data-en="Usage reset cycle" data-fa="سیکل ریست حجم">Usage reset cycle</label>
+              <select class="fs" id="lc-cycle">
+                <option value="off" data-en="Off" data-fa="خاموش">Off</option>
+                <option value="monthly" data-en="Monthly (calendar)" data-fa="ماهانه (تقویمی)">Monthly</option>
+                <option value="30d" data-en="Every 30 days" data-fa="هر ۳۰ روز">Every 30 days</option>
+              </select></div>
+          </div>
+        </div>
+        <button class="btn btn-gold btn-sm" style="margin-top:12px" id="lc-save" onclick="saveLifecycle()" data-en="Save Automation" data-fa="ذخیرهٔ اتوماسیون">Save Automation</button>
+      </div>
+      <div class="card" style="margin-top:14px">
+        <div class="card-hd">
+          <div class="card-title" data-en="🖥 Active Sessions" data-fa="🖥 نشست‌های فعال">🖥 Active Sessions</div>
+          <button class="btn btn-danger btn-sm" onclick="logoutAll()" data-en="Logout everywhere" data-fa="خروج از همه‌جا">Logout everywhere</button>
+        </div>
+        <div id="sess-list" style="display:flex;flex-direction:column;gap:8px"><span style="font-size:11px;color:var(--text3)">…</span></div>
+      </div>
       <div class="card" style="margin-top:14px">
         <div class="card-hd"><div class="card-title" data-en="Live Logs" data-fa="لاگ‌های زنده">Live Logs</div></div>
         <div class="live-logs-container" id="log-container">Connecting to live logs...</div>
@@ -4614,6 +5112,23 @@ body{background:radial-gradient(circle at 78% -8%,rgba(255,36,72,.12),transparen
 </div>
 
 <!-- Modals -->
+<div class="mo" id="mo-batch" onclick="if(event.target===this)this.classList.remove('show')">
+  <div class="mo-box" style="max-width:440px">
+    <button class="mo-close" onclick="document.getElementById('mo-batch').classList.remove('show')">✕</button>
+    <div class="mo-title" data-en="⚡ BATCH CREATE" data-fa="⚡ ساخت گروهی">⚡ BATCH CREATE</div>
+    <div class="fg"><label class="fl" data-en="Base name" data-fa="نام پایه">Base name</label><input class="fi" id="bt-base" data-ph-en="e.g. Ali" data-ph-fa="مثلاً Ali" placeholder="Ali"></div>
+    <div class="fr">
+      <div class="fg"><label class="fl" data-en="Count" data-fa="تعداد">Count</label><input class="fi" id="bt-count" type="number" min="1" max="100" value="10"></div>
+      <div class="fg"><label class="fl" data-en="Volume" data-fa="حجم">Volume</label><input class="fi" id="bt-limit" type="number" min="0" step=".1" value="30"></div>
+      <div class="fg" style="max-width:100px"><label class="fl" data-en="Unit" data-fa="واحد">Unit</label><select class="fs" id="bt-unit"><option>GB</option><option>MB</option><option>TB</option><option value="0" data-en="∞" data-fa="∞">∞</option></select></div>
+    </div>
+    <div class="fr">
+      <div class="fg"><label class="fl" data-en="Days Valid" data-fa="روزهای اعتبار">Days Valid</label><input class="fi" id="bt-days" type="number" min="0" value="30"></div>
+      <div class="fg"><label class="fl" data-en="Max IPs" data-fa="حداکثر آی‌پی">Max IPs</label><input class="fi" id="bt-mc" type="number" min="0" value="0"></div>
+    </div>
+    <button class="btn btn-gold" style="width:100%;justify-content:center;margin-top:8px" id="bt-go" onclick="batchCreate()" data-en="Create All" data-fa="ساخت همه">Create All</button>
+  </div>
+</div>
 <div class="mo" id="mo-add" onclick="if(event.target===this)this.classList.remove('show')">
   <div class="mo-box">
     <button class="mo-close" onclick="document.getElementById('mo-add').classList.remove('show')">✕</button>
@@ -4934,7 +5449,19 @@ async function doLogin(){
   $m('login-err').style.display='none';
   try{
     const r=await fetch('/api/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({password:pw})});
-    if(r.ok){$m('login-pw').value='';showDashboard()}
+    const d=await r.json().catch(()=>({}));
+    if(r.ok&&d.ok!==false){$m('login-pw').value='';showDashboard()}
+    else if(d.twofa){$m('lg-2fa').style.display='block';$m('lg-code').focus()}
+    else $m('login-err').style.display='block';
+  }catch(e){$m('login-err').style.display='block'}
+}
+async function verify2fa(){
+  const code=($m('lg-code').value||'').trim();
+  if(!code)return;
+  $m('login-err').style.display='none';
+  try{
+    const r=await fetch('/api/login/verify',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({code})});
+    if(r.ok){$m('lg-2fa').style.display='none';$m('lg-code').value='';$m('login-pw').value='';showDashboard()}
     else $m('login-err').style.display='block';
   }catch(e){$m('login-err').style.display='block'}
 }
@@ -4953,6 +5480,8 @@ function switchPage(id){
   const target=$m('page-'+id);
   if(target)target.classList.add('active');
   document.querySelectorAll('.nav-item').forEach(n=>n.classList.toggle('active',n.dataset.page===id));
+  if(id==='traffic')loadTrafficHistory();
+  if(id==='security')loadSessions();
 }
 
 function toast(msg,err=false){
@@ -5004,6 +5533,134 @@ function filterLinks(){
   else if(cf==='off')r=r.filter(l=>!l.active);
   if(q)r=r.filter(l=>l.label.toLowerCase().includes(q)||l.uuid.toLowerCase().includes(q));
   renderLinks(r);
+}
+
+// ── v3: selection / bulk / quick actions / batch / history / 2FA / sessions ──
+const selectedUIDs=new Set();
+function onRowSel(el){
+  if(el.checked)selectedUIDs.add(el.dataset.uid);else selectedUIDs.delete(el.dataset.uid);
+  updateBulkBar();
+}
+function toggleSelectAll(el){
+  document.querySelectorAll('.row-sel').forEach(c=>{
+    c.checked=el.checked;
+    if(el.checked)selectedUIDs.add(c.dataset.uid);else selectedUIDs.delete(c.dataset.uid);
+  });
+  updateBulkBar();
+}
+function updateBulkBar(){
+  const b=$m('bulk-bar');if(!b)return;
+  b.style.display=selectedUIDs.size>0?'flex':'none';
+  const cnt=$m('bulk-count');if(cnt)cnt.textContent=selectedUIDs.size;
+}
+async function bulkAction(action){
+  if(!selectedUIDs.size)return;
+  if(action==='delete'&&!confirm(lang==='fa'?('حذف '+selectedUIDs.size+' ساب؟'):('Delete '+selectedUIDs.size+' inbound(s)?')))return;
+  try{
+    const r=await fetch('/api/links/bulk',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action,uids:[...selectedUIDs]})});
+    if(!r.ok)throw new Error();
+    const d=await r.json();
+    toast((lang==='fa'?'انجام شد: ':'Done: ')+d.affected);
+    selectedUIDs.clear();
+    await loadLinks();loadStats();
+  }catch(e){toast('Bulk action failed',true)}
+}
+function exportCSV(){
+  const ls=allLinks.filter(l=>selectedUIDs.has(l.uuid));
+  if(!ls.length)return;
+  const rows=[['name','uid','sub_url','limit_bytes','used_bytes','expires_at','active']];
+  ls.forEach(l=>rows.push([l.label,l.uuid,location.origin+'/sub/'+l.uuid,l.limit_bytes||0,l.used_bytes||0,l.expires_at||'',l.active?'on':'off']));
+  const csv=rows.map(r=>r.map(v=>'"'+String(v).replace(/"/g,'""')+'"').join(',')).join('\n');
+  const a=document.createElement('a');
+  a.href=URL.createObjectURL(new Blob(["\ufeff"+csv],{type:'text/csv;charset=utf-8'}));
+  a.download='nexovip-export.csv';a.click();
+  toast(lang==='fa'?'CSV دانلود شد':'CSV exported');
+}
+async function quickExtend(uid){
+  try{
+    const r=await fetch('/api/links/'+uid,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({extend_days:30})});
+    if(!r.ok)throw new Error();
+    toast(lang==='fa'?'+۳۰ روز اضافه شد':'+30 days added');
+    await loadLinks();
+  }catch(e){toast('Failed',true)}
+}
+async function quickReset(uid){
+  try{
+    const r=await fetch('/api/links/'+uid,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({reset_usage:true})});
+    if(!r.ok)throw new Error();
+    toast(lang==='fa'?'حجم ریست شد':'Usage reset');
+    await loadLinks();loadStats();
+  }catch(e){toast('Failed',true)}
+}
+function showBatchMo(){$m('mo-batch').classList.add('show')}
+async function batchCreate(){
+  const base=($m('bt-base').value||'').trim();
+  const count=parseInt($m('bt-count').value||'0',10);
+  if(!base){toast(lang==='fa'?'نام پایه را بنویس':'Enter base name',true);return}
+  if(!(count>=1&&count<=100)){toast(lang==='fa'?'تعداد باید ۱ تا ۱۰۰ باشد':'Count must be 1-100',true);return}
+  const unit=$m('bt-unit').value;
+  const lim=unit==='0'?0:parseFloat($m('bt-limit').value||'0');
+  const btn=$m('bt-go');if(btn)btn.disabled=true;
+  try{
+    const r=await fetch('/api/links/batch',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({base_label:base,count,limit_value:lim,limit_unit:unit==='0'?'GB':unit,days_valid:parseInt($m('bt-days').value||'0',10),max_connections:parseInt($m('bt-mc').value||'0',10)})});
+    const d=await r.json().catch(()=>({}));
+    if(!r.ok)throw new Error(d.detail||'Batch failed');
+    toast((lang==='fa'?'ساخته شد: ':'Created: ')+d.created);
+    $m('mo-batch').classList.remove('show');
+    await loadLinks();
+  }catch(e){toast(e.message||'Batch failed',true)}
+  finally{if(btn)btn.disabled=false}
+}
+let hChart=null;
+async function loadTrafficHistory(){
+  try{
+    const r=await fetch('/api/traffic/history');
+    if(!r.ok)return;
+    const d=await r.json();
+    const days=Object.entries(d.daily||{}).sort((a,b)=>a[0].localeCompare(b[0])).slice(-7);
+    const labels=days.map(x=>x[0].slice(5));
+    const data=days.map(x=>+(x[1]/1048576).toFixed(1));
+    const el=$m('hist-chart');
+    if(!el||!window.Chart)return;
+    if(hChart){hChart.data.labels=labels;hChart.data.datasets[0].data=data;hChart.update();return}
+    hChart=new Chart(el,{type:'bar',data:{labels,datasets:[{data,backgroundColor:'rgba(239,42,58,.55)',borderColor:'#ef2a3a',borderWidth:1.5,borderRadius:6}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{x:{grid:{display:false},ticks:{color:'#8b8f9a',font:{size:10}}},y:{beginAtZero:true,grid:{color:'rgba(255,255,255,.05)'},ticks:{color:'#8b8f9a',font:{size:10},callback:v=>v+'MB'}}}}});
+    const tot=data.reduce((a,b)=>a+b,0);
+    const tt=$m('th-total');
+    if(tt)tt.textContent=(lang==='fa'?'۷ روز: ':'7 days: ')+fmtB(tot*1048576);
+  }catch(e){}
+}
+async function loadSessions(){
+  try{
+    const r=await fetch('/api/sessions');
+    if(!r.ok)return;
+    const d=await r.json();
+    const box=$m('sess-list');if(!box)return;
+    if(!d.sessions||!d.sessions.length){box.innerHTML='<span style="font-size:11px;color:var(--text3)">—</span>';return}
+    box.innerHTML=d.sessions.map(s=>'<div style="display:flex;align-items:center;gap:8px;font-size:11.5px;padding:8px 10px;border:1px solid var(--border);border-radius:10px;flex-wrap:wrap">'
+      +(s.current?'<span class="tag tag-on">'+(lang==='fa'?'همین دستگاه':'This device')+'</span>':'')
+      +'<span style="font-weight:700;direction:ltr">'+esc(s.ip)+'</span>'
+      +'<span style="color:var(--text3);overflow:hidden;text-overflow:ellipsis;max-width:220px;white-space:nowrap">'+esc(s.ua||'')+'</span>'
+      +'<span style="flex:1"></span>'
+      +'<span style="color:var(--text3)">'+(s.created_min_ago<1?'now':s.created_min_ago+'m')+'</span>'
+      +'</div>').join('');
+  }catch(e){}
+}
+async function logoutAll(){
+  if(!confirm(lang==='fa'?'همهٔ نشست‌های دیگر بسته شوند؟':'Terminate all other sessions?'))return;
+  try{
+    const r=await fetch('/api/sessions/logout-all',{method:'POST'});
+    if(!r.ok)throw new Error();
+    toast(lang==='fa'?'انجام شد':'Done');loadSessions();
+  }catch(e){toast('Failed',true)}
+}
+async function saveLifecycle(){
+  const btn=$m('lc-save');if(btn)btn.disabled=true;
+  try{
+    const r=await fetch('/api/settings',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({auto_disable:!!($m('lc-disable')&&$m('lc-disable').checked),twofa:!!($m('lc-twofa')&&$m('lc-twofa').checked),auto_delete_days:parseInt(($m('lc-del')&&$m('lc-del').value)||'0',10),reset_cycle:($m('lc-cycle')&&$m('lc-cycle').value)||'off'})});
+    if(!r.ok)throw new Error();
+    toast(lang==='fa'?'ذخیره شد':'Saved');
+  }catch(e){toast('Save failed',true)}
+  finally{if(btn)btn.disabled=false}
 }
 
 function processAlertsAndCharts(){
@@ -5061,7 +5718,9 @@ function renderLinks(links){
     const i=idx--;
     const cc=l.current_connections||0;
     const mc2=l.max_connections||0;
-    return{l,pct,col,ex,ec,i,cc,mc2,u,lim};
+    const fc=(l.forecast&&l.forecast.days_left!=null&&l.forecast.days_left>0)?l.forecast:null;
+    const fcTxt=fc?(fc.days_left>=10?('≈'+Math.round(fc.days_left)+'d'):('≈'+fc.days_left.toFixed(1)+'d')):'';
+    return{l,pct,col,ex,ec,i,cc,mc2,u,lim,fc,fcTxt};
   });
 
   const editText=tr('edit');
@@ -5071,15 +5730,18 @@ function renderLinks(links){
   const delText=tr('del');
 
   tb.innerHTML=rows.map(r=>`<tr>
+    <td><input type="checkbox" class="row-sel" data-uid="${r.l.uuid}" ${selectedUIDs.has(r.l.uuid)?'checked':''} onchange="onRowSel(this)" style="accent-color:var(--red);cursor:pointer"></td>
     <td style="color:var(--text3);font-size:10.5px">${r.i}</td>
     <td style="font-weight:600">${esc(r.l.label)}</td>
     <td><span class="tag tag-vless">${protoBadge(r.l.variants)}</span></td>
     <td><div class="pill"><span class="pill-used">${fmtB(r.u)}</span><div class="pill-bar"><div class="pill-fill" style="width:${r.pct}%;background:${r.col}"></div></div><span class="pill-lim">${fmtLim(r.lim)}</span></div></td>
     <td style="font-size:11px;font-weight:600;color:${r.mc2>0&&r.cc>=r.mc2?'var(--red)':'var(--text2)'}">${r.cc}/${r.mc2||'∞'}</td>
-    <td style="font-size:10.5px;font-weight:700;color:${r.ec}">${r.ex}</td>
+    <td style="font-size:10.5px;font-weight:700;color:${r.ec}">${r.ex}${r.fc?`<div style="font-size:9px;font-weight:600;color:var(--gold);margin-top:2px">⚡ ${r.fcTxt}</div>`:''}</td>
     <td><span class="tag ${r.l.active?'tag-on':'tag-off'}">${r.l.active?'On':'Off'}</span></td>
     <td><div style="display:flex;gap:3px;align-items:center;flex-wrap:wrap">
       <button class="toggle ${r.l.active?'on':''}" data-uid="${r.l.uuid}" onclick="togLink(this)"></button>
+      <button class="act-btn act-copy" style="color:var(--gold)" title="+30 days" onclick="quickExtend('${r.l.uuid}')">+30d</button>
+      <button class="act-btn act-copy" style="color:var(--gold)" title="Reset usage" onclick="quickReset('${r.l.uuid}')">↺</button>
       <button class="act-btn act-edit" onclick="showEditMo('${r.l.uuid}')">${editText}</button>
       <button class="act-btn act-copy" onclick="cpLink('${esc((r.l.vless_links||[]).join(String.fromCharCode(10)))}')">${copyText}</button>
       <button class="act-btn act-sub" onclick="cpSub('${r.l.uuid}')">${subText}</button>
@@ -5091,6 +5753,7 @@ function renderLinks(links){
   mc.innerHTML=rows.map(r=>`<div class="m-card">
     <div class="m-card-hd">
       <div style="display:flex;align-items:center;gap:7px">
+        <input type="checkbox" class="row-sel" data-uid="${r.l.uuid}" ${selectedUIDs.has(r.l.uuid)?'checked':''} onchange="onRowSel(this)" style="accent-color:var(--red);cursor:pointer">
         <span style="font-size:11px;color:var(--text3)">#${r.i}</span>
         <span style="font-weight:600;font-size:14px">${esc(r.l.label)}</span>
         <span class="tag tag-vless">${protoBadge(r.l.variants)}</span>
@@ -5098,8 +5761,10 @@ function renderLinks(links){
       <button class="toggle ${r.l.active?'on':''}" data-uid="${r.l.uuid}" onclick="togLink(this)"></button>
     </div>
     <div class="pill"><span class="pill-used">${fmtB(r.u)}</span><div class="pill-bar"><div class="pill-fill" style="width:${r.pct}%;background:${r.col}"></div></div><span class="pill-lim">${fmtLim(r.lim)}</span></div>
-    <div style="font-size:11.5px;color:${r.ec};margin-top:6px;font-weight:600">⏳ ${r.ex} · ${r.cc}/${r.mc2||'∞'} IPs</div>
+    <div style="font-size:11.5px;color:${r.ec};margin-top:6px;font-weight:600">⏳ ${r.ex} · ${r.cc}/${r.mc2||'∞'} IPs${r.fc?' · <span style="color:var(--gold)">⚡ '+r.fcTxt+'</span>':''}</div>
     <div class="m-card-acts">
+      <button class="act-btn act-copy" style="color:var(--gold)" onclick="quickExtend('${r.l.uuid}')">+30d</button>
+      <button class="act-btn act-copy" style="color:var(--gold)" onclick="quickReset('${r.l.uuid}')">↺</button>
       <button class="act-btn act-edit" onclick="showEditMo('${r.l.uuid}')">${editText}</button>
       <button class="act-btn act-copy" onclick="cpLink('${esc((r.l.vless_links||[]).join(String.fromCharCode(10)))}')">${copyText}</button>
       <button class="act-btn act-sub" onclick="cpSub('${r.l.uuid}')">${subText}</button>
@@ -5109,6 +5774,7 @@ function renderLinks(links){
   </div>`).join('');
   
   processAlertsAndCharts();
+  updateBulkBar();
 }
 
 async function togLink(el){
@@ -5267,6 +5933,10 @@ async function loadSettings(){
       if($m('rw-token'))$m('rw-token').value=d.railway_token||'';
       if($m('rw-tg-notify-conn'))$m('rw-tg-notify-conn').checked=!!d.notify_connections;
       if($m('bk-interval'))$m('bk-interval').value=String(d.backup_interval_hours||'0');
+      if($m('lc-disable'))$m('lc-disable').checked=!!d.auto_disable;
+      if($m('lc-twofa'))$m('lc-twofa').checked=!!d.twofa;
+      if($m('lc-del'))$m('lc-del').value=String(d.auto_delete_days||0);
+      if($m('lc-cycle'))$m('lc-cycle').value=d.reset_cycle||'off';
     }
   }catch(e){}
 }
