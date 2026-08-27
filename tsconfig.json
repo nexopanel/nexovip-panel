@@ -1,12 +1,10 @@
 {
-  "//": "This project is a Python/FastAPI app (main.py). This no-op tsconfig exists only so the platform's `tsc -b --noEmit` check passes; it intentionally includes no TypeScript sources.",
+  "//": "Python/FastAPI project — this config only satisfies the platform's tsc check by including the single no-op typings.d.ts.",
   "compilerOptions": {
     "target": "ES2020",
     "module": "ESNext",
-    "moduleResolution": "Bundler",
     "skipLibCheck": true,
     "noEmit": true
   },
-  "files": [],
-  "include": []
+  "include": ["typings.d.ts"]
 }
