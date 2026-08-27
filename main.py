@@ -16,7 +16,7 @@ from datetime import datetime, timezone, timedelta
 from urllib.parse import quote
 from collections import deque, defaultdict
 
-from fastapi import FastAPI, Request, HTTPException, WebSocket, WebSocketDisconnect, Depends, UploadFile, File
+from fastapi import FastAPI, Request, HTTPException, WebSocket, WebSocketDisconnect, Depends
 from fastapi.responses import Response, HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -1550,8 +1550,9 @@ async def api_backup_now(_=Depends(require_auth)):
     return {"ok": True, "detail": msg}
 
 @app.post("/api/backup/restore")
-async def api_backup_restore(file: UploadFile = File(...), _=Depends(require_auth)):
-    data = await file.read()
+async def api_backup_restore(request: Request, _=Depends(require_auth)):
+    # آپلود raw body (بدون multipart) — به python-multipart نیازی نیست
+    data = await request.body()
     if len(data) < 100 or len(data) > 100 * 1024 * 1024:
         raise HTTPException(status_code=400, detail="Invalid backup file size")
     if not data.startswith(b"SQLite format 3\x00"):
@@ -5490,9 +5491,8 @@ async function restoreBackup(input){
   const f=input.files&&input.files[0];
   if(!f)return;
   if(!confirm(lang==='fa'?'کل دیتابیس با این بکاپ جایگزین می‌شود! مطمئنی؟':'This will REPLACE the whole database with this backup! Continue?')){input.value='';return}
-  const fd=new FormData();fd.append('file',f);
   try{
-    const r=await fetch('/api/backup/restore',{method:'POST',body:fd});
+    const r=await fetch('/api/backup/restore',{method:'POST',headers:{'Content-Type':'application/octet-stream'},body:f});
     const d=await r.json().catch(()=>({}));
     if(!r.ok)throw new Error(d.detail||'Restore failed');
     toast(lang==='fa'?('بازیابی شد ✅ ('+d.links+' ساب)'):('Restored ✅ ('+d.links+' links)'));
