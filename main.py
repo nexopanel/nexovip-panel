@@ -5256,10 +5256,20 @@ async function importAddrs(source){
 setTheme(theme);
 setLang(lang);
 checkAuth();
-let statsInterval=null;
+let statsFastInterval=null,statsSlowInterval=null;
 function startPolling(){
-  if(statsInterval)clearInterval(statsInterval);
-  statsInterval=setInterval(()=>{if(isAuthenticated){loadStats();loadLinks();updateNotifBadge()}},12000);
+  if(statsFastInterval)clearInterval(statsFastInterval);
+  if(statsSlowInterval)clearInterval(statsSlowInterval);
+  // آمار داشبورد: هر ۱ ثانیه — گارد statsBusy جلوگیری از تلنبار شدن درخواست‌ها اگه سرور کند بود
+  let statsBusy=false;
+  statsFastInterval=setInterval(async()=>{
+    if(!isAuthenticated||statsBusy)return;
+    statsBusy=true;
+    try{await loadStats()}catch(e){}
+    statsBusy=false;
+  },1000);
+  // لینک‌ها و اعلان‌ها: مثل قبل هر ۱۲ ثانیه
+  statsSlowInterval=setInterval(()=>{if(isAuthenticated){loadLinks();updateNotifBadge()}},12000);
 }
 startPolling();
 
