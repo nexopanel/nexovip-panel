@@ -1813,6 +1813,57 @@ async def railway_create_volume(request: Request, _=Depends(require_auth)):
         "state": "creating",
     }
 
+# ── Host IP detection (Sanaei-style dashboard) ──────────────────────────────
+_public_ip_cache: dict = {"ip": "", "ts": 0.0, "fail_ts": 0.0}
+PUBLIC_IP_TTL = 3600        # کش موفق: یک ساعت
+PUBLIC_IP_FAIL_TTL = 300    # بعد از شکست، ۵ دقیقه دوباره تلاش نکن تا /stats کند نشه
+_PUBLIC_IP_SERVICES = (
+    "https://api.ipify.org",
+    "https://ifconfig.me/ip",
+    "https://icanhazip.com",
+)
+
+def _looks_like_ipv4(s: str) -> bool:
+    if not re.match(r"^\d{1,3}(\.\d{1,3}){3}$", s or ""):
+        return False
+    return all(0 <= int(p) <= 255 for p in s.split("."))
+
+def local_interface_ip() -> str:
+    """IP اینترفیس خروجی — بدون ارسال ترافیک واقعی (UDP connect فقط route را می‌خواند)."""
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        s.connect(("8.8.8.8", 80))
+        return s.getsockname()[0]
+    except Exception:
+        return "127.0.0.1"
+    finally:
+        try:
+            s.close()
+        except Exception:
+            pass
+
+async def fetch_public_ip() -> str:
+    """IP عمومی سرور را با کش از سرویس‌های echo می‌گیرد؛ در محیط بدون اینترنت خروجی،
+    سریع رشتهٔ خالی برمی‌گرداند تا poll دوره‌ای /stats کند نشود."""
+    now = time.time()
+    if _public_ip_cache["ip"] and now - _public_ip_cache["ts"] < PUBLIC_IP_TTL:
+        return _public_ip_cache["ip"]
+    if now - _public_ip_cache["fail_ts"] < PUBLIC_IP_FAIL_TTL:
+        return ""
+    for url in _PUBLIC_IP_SERVICES:
+        try:
+            async with httpx.AsyncClient(timeout=4.0) as client:
+                r = await client.get(url, headers={"user-agent": "curl/8.0"})
+                ip = (r.text or "").strip()
+            if _looks_like_ipv4(ip):
+                _public_ip_cache["ip"] = ip
+                _public_ip_cache["ts"] = now
+                return ip
+        except Exception:
+            continue
+    _public_ip_cache["fail_ts"] = now
+    return ""
+
 @app.get("/stats")
 async def get_stats(_=Depends(require_auth)):
     async with connections_lock:
@@ -1830,6 +1881,8 @@ async def get_stats(_=Depends(require_auth)):
         "cpu_percent": psutil.cpu_percent(interval=0.1),
         "memory_percent": psutil.virtual_memory().percent,
         "hourly_traffic": dict(hourly_traffic),
+        "server_ip": await fetch_public_ip(),
+        "local_ip": local_interface_ip(),
     }
 
 @app.post("/api/links")
@@ -3613,32 +3666,22 @@ body[dir="rtl"]{direction:rtl;text-align:right}
 .meta-chip{display:flex;align-items:center;gap:7px;padding:8px 12px;border-radius:9px;max-width:100%;
   background:var(--surface3);border:1px solid var(--border);font-size:11.5px;font-weight:600;color:var(--text2)}
 .meta-chip span:last-child{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-/* Clean IP pool */
-.ip-card .card-hd{flex-wrap:wrap;gap:8px}
+/* Host / Server IP (Sanaei-style) */
+.host-card .card-hd{flex-wrap:wrap;gap:8px}
 .ip-title-ic{font-size:14px}
-.ip-count{min-width:22px;height:20px;padding:0 7px;border-radius:999px;background:var(--gold-dim);
-  color:var(--gold2);font-size:11px;font-weight:800;display:inline-flex;align-items:center;
-  justify-content:center;margin-inline-start:4px}
-.ip-actions{display:flex;gap:6px;flex-wrap:wrap}
-.ip-scroll{display:flex;flex-wrap:wrap;gap:8px;max-height:150px;overflow-y:auto;padding:2px}
-.ip-chip{display:inline-flex;align-items:center;gap:8px;padding:8px 13px;border-radius:9px;cursor:pointer;
-  background:var(--surface3);border:1px solid var(--border);transition:all .2s;
-  font-family:ui-monospace,'Cascadia Mono','Consolas',monospace;font-size:12px;color:var(--text)}
-.ip-chip:hover{border-color:var(--border2);box-shadow:var(--gold-glow);transform:translateY(-1px)}
-.ip-chip:active{transform:translateY(0)}
-.ip-dot{width:6px;height:6px;border-radius:50%;background:var(--green);flex-shrink:0;
-  box-shadow:0 0 6px rgba(73,229,141,.65)}
-.ip-empty{width:100%;text-align:center;padding:22px;color:var(--text3);font-size:12px;
-  border:1px dashed var(--border);border-radius:12px}
-.ip-footer{margin-top:12px;padding-top:11px;border-top:1px solid var(--border);cursor:pointer;
-  font-size:11.5px;font-weight:700;color:var(--gold2);display:flex;align-items:center;gap:5px;transition:gap .2s}
-.ip-footer:hover{gap:10px}
+.host-ip-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
+.host-ip-box{display:flex;flex-direction:column;gap:7px;padding:13px 15px;border-radius:12px;min-width:0;
+  background:var(--surface3);border:1px solid var(--border);transition:border-color .25s,box-shadow .25s;cursor:pointer}
+.host-ip-box:hover{border-color:var(--border2);box-shadow:var(--gold-glow)}
+.host-ip-label{font-size:9.5px;font-weight:800;letter-spacing:.1em;text-transform:uppercase;color:var(--text3)}
+.host-ip-val{font-family:ui-monospace,'Cascadia Mono','Consolas',monospace;font-size:14px;font-weight:700;
+  color:var(--text);direction:ltr;text-align:start;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;user-select:all}
+.host-ip-val.loading{color:var(--text3);animation:pulseDot 1.2s ease-in-out infinite}
+@media(max-width:900px){.host-ip-grid{grid-template-columns:1fr;gap:8px}}
 @media(max-width:768px){
   .dash-live-pill{padding:6px 12px;font-size:10px}
   .stat-card.premium{padding:18px 18px 16px}
   .sys-metric-val{font-size:18px}
-  .ip-scroll{max-height:190px}
-  .ip-footer span:last-child{margin-inline-start:auto}
 }
 .sl-item{display:flex;align-items:center;justify-content:space-between;padding:10px 0;border-bottom:1px solid var(--border)}
 .sl-k{color:var(--text3);font-size:11.5px}
@@ -4014,17 +4057,25 @@ body{background:radial-gradient(circle at 78% -8%,rgba(255,36,72,.12),transparen
           <div class="chart-container"><canvas id="tc"></canvas></div>
         </div>
       </div>
-      <div class="card ip-card">
+      <div class="card host-card">
         <div class="card-hd">
-          <div class="card-title"><span class="ip-title-ic">🌐</span><span data-en="Clean IP Pool" data-fa="استخر آی‌پی تمیز">Clean IP Pool</span><span class="ip-count" id="dash-ip-count">0</span></div>
-          <div class="ip-actions">
-            <button class="btn btn-ghost btn-sm" onclick="copyAllIPs()" data-en="⧉ Copy All" data-fa="⧉ کپی همه">⧉ Copy All</button>
-            <button class="btn btn-ghost btn-sm" onclick="importAddrs('railway')" data-en="🚄 Railway" data-fa="🚄 ریلوی">🚄 Railway</button>
-            <button class="btn btn-gold btn-sm" onclick="showAddAddrMo()" data-en="+ Add IP" data-fa="+ افزودن">+ Add IP</button>
+          <div class="card-title"><span class="ip-title-ic">🖧</span><span data-en="Server / Host IP" data-fa="آی‌پی اصلی هاست">Server / Host IP</span></div>
+          <button class="btn btn-ghost btn-sm" onclick="copyHostIP()" data-en="⧉ Copy IP" data-fa="⧉ کپی آی‌پی">⧉ Copy IP</button>
+        </div>
+        <div class="host-ip-grid">
+          <div class="host-ip-box" onclick="cpVal(this.querySelector('.host-ip-val'))">
+            <span class="host-ip-label" data-en="Public IP" data-fa="آی‌پی عمومی">Public IP</span>
+            <span class="host-ip-val loading" id="host-pub-ip">…</span>
+          </div>
+          <div class="host-ip-box" onclick="cpVal(this.querySelector('.host-ip-val'))">
+            <span class="host-ip-label" data-en="Internal IP" data-fa="آی‌پی داخلی">Internal IP</span>
+            <span class="host-ip-val loading" id="host-loc-ip">…</span>
+          </div>
+          <div class="host-ip-box" onclick="cpVal(this.querySelector('.host-ip-val'))">
+            <span class="host-ip-label" data-en="Domain" data-fa="دامنه">Domain</span>
+            <span class="host-ip-val loading" id="host-dom">…</span>
           </div>
         </div>
-        <div class="ip-scroll" id="dash-ip-list"></div>
-        <div class="ip-footer" onclick="switchPage('addresses')"><span data-en="Manage all IPs" data-fa="مدیریت همه آی‌پی‌ها">Manage all IPs</span><span>→</span></div>
       </div>
     </section>
 
@@ -4792,6 +4843,20 @@ async function delLink(uid){
   }catch(e){toast('Error deleting',true)}
 }
 
+function cpVal(el){
+  if(!el)return;
+  const v=(el.textContent||'').trim();
+  if(!v||v==='…')return;
+  navigator.clipboard.writeText(v).then(()=>toast(lang==='fa'?'کپی شد':'Copied!')).catch(()=>toast('Failed to copy',true));
+}
+
+async function copyHostIP(){
+  const el=$m('host-pub-ip');
+  const v=el?(el.textContent||'').trim():'';
+  if(!v||v==='…'){toast(lang==='fa'?'آی‌پی هنوز لود نشده':'IP not loaded yet',true);return}
+  try{await navigator.clipboard.writeText(v);toast(lang==='fa'?'آی‌پی کپی شد':'IP copied!')}catch(e){toast('Failed to copy',true)}
+}
+
 function cpLink(txt){
   if(!txt){toast('No link to copy',true);return}
   navigator.clipboard.writeText(txt).then(()=>toast('Copied!')).catch(()=>toast('Failed to copy',true));
@@ -4950,6 +5015,9 @@ async function loadStats(){
     $m('sv-links').textContent=sData.links_count||0;
     if($m('sv-conn'))$m('sv-conn').textContent=(sData.active_connections!=null?sData.active_connections:0);
     if($m('sv-req'))$m('sv-req').textContent=(sData.total_requests||0).toLocaleString();
+    if($m('host-pub-ip')){$m('host-pub-ip').textContent=sData.server_ip||'…';$m('host-pub-ip').classList.remove('loading')}
+    if($m('host-loc-ip')){$m('host-loc-ip').textContent=sData.local_ip||'…';$m('host-loc-ip').classList.remove('loading')}
+    if($m('host-dom')){$m('host-dom').textContent=sData.domain||'…';$m('host-dom').classList.remove('loading')}
     $m('sv-uptime').textContent=sData.uptime||'-';
     $m('sv-domain').textContent=sData.domain||'-';
     $m('nb').textContent=sData.links_count||0;
@@ -5050,7 +5118,7 @@ async function loadAddrs(){
   try{
     const r=await fetch('/api/addresses');
     if(!r.ok)throw new Error();
-    const d=await r.json();allAddrs=d.addresses||[];renderAddrs();renderDashIPs();
+    const d=await r.json();allAddrs=d.addresses||[];renderAddrs();
   }catch(e){}
 }
 
@@ -5065,26 +5133,6 @@ function renderAddrs(){
     </div>
     <button class="act-btn act-del" onclick="delAddr(${i})">${tr('del')}</button>
   </div>`).join('');
-}
-
-function renderDashIPs(){
-  const el=$m('dash-ip-list');
-  if(!el)return;
-  const cnt=$m('dash-ip-count');
-  if(cnt)cnt.textContent=(allAddrs||[]).length;
-  if(!allAddrs||!allAddrs.length){
-    el.innerHTML='<div class="ip-empty">'+(lang==='fa'?'هنوز آی‌پی تمیزی اضافه نشده — از دکمه‌های بالا اضافه کن یا ایمپورت کن':'No clean IPs yet — add or import with the buttons above')+'</div>';
-    return;
-  }
-  el.innerHTML=allAddrs.map(a=>'<div class="ip-chip" data-v="'+esc(a)+'" onclick="cpLink(this.dataset.v)" title="Click to copy"><span class="ip-dot"></span>'+esc(a)+'</div>').join('');
-}
-
-async function copyAllIPs(){
-  if(!allAddrs||!allAddrs.length){toast('No IPs to copy',true);return}
-  try{
-    await navigator.clipboard.writeText(allAddrs.join('\n'));
-    toast((lang==='fa'?'همه آی‌پی‌ها کپی شد':'All IPs copied!'));
-  }catch(e){toast('Failed to copy',true)}
 }
 
 function showAddAddrMo(){$m('na').value='';$m('mo-addr').classList.add('show')}
