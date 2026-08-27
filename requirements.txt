@@ -4,3 +4,4 @@ websockets==12.0
 httpx==0.25.1
 psutil==5.9.6
 pyTelegramBotAPI
+qrcode==7.4.2

@@ -8,20 +8,29 @@ import uuid
 import time
 import re
 import base64
+import io
+import shutil
 import sqlite3
 import socket
 from datetime import datetime, timezone, timedelta
 from urllib.parse import quote
 from collections import deque, defaultdict
 
-from fastapi import FastAPI, Request, HTTPException, WebSocket, WebSocketDisconnect, Depends
-from fastapi.responses import Response, HTMLResponse, JSONResponse
+from fastapi import FastAPI, Request, HTTPException, WebSocket, WebSocketDisconnect, Depends, UploadFile, File
+from fastapi.responses import Response, HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 import uvicorn
 import httpx
 import logging
 import psutil
+
+try:
+    import qrcode
+    import qrcode.image.svg
+    _QR_AVAILABLE = True
+except Exception:
+    _QR_AVAILABLE = False
 
 try:
     import telebot
@@ -207,6 +216,7 @@ CONFIG = {
     "bot_lang": "en",
     "railway_token": "",
     "notify_connections": "0",
+    "backup_interval_hours": "0",
 }
 
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
@@ -713,7 +723,7 @@ async def save_db():
                 for addr in CUSTOM_ADDRESSES:
                     conn.execute("INSERT INTO custom_addresses (address) VALUES (?)", (addr,))
             # Save settings
-            for key in ("telegram_token", "telegram_admin_id", "bot_lang", "railway_token", "notify_connections"):
+            for key in ("telegram_token", "telegram_admin_id", "bot_lang", "railway_token", "notify_connections", "backup_interval_hours"):
                 conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)", (key, CONFIG.get(key, "")))
             conn.commit()
     except Exception as e:
@@ -854,6 +864,7 @@ async def startup():
     asyncio.create_task(github_check_loop())
     await restart_telegram_bot()
     asyncio.create_task(telegram_notifier_cron())
+    asyncio.create_task(backup_cron())
     await ensure_default_link()
 
 @app.on_event("shutdown")
@@ -1460,6 +1471,128 @@ async def handle_reset_command(text: str) -> str:
     await save_db()
     return L("reset_success", name=name)
 
+# ── Telegram auto-backup / restore ──────────────────────────────────────────
+_last_backup_ts = 0.0
+_last_backup_fail_ts = 0.0
+
+async def do_backup(trigger: str = "manual"):
+    """از دیتابیس SQLite یک بکاپ کامل می‌گیرد و به چت ادمین تلگرام می‌فرستد."""
+    global _last_backup_ts, _last_backup_fail_ts
+    token = CONFIG.get("telegram_token")
+    admin_id = CONFIG.get("telegram_admin_id")
+    if not token or not admin_id or bot is None:
+        return False, "Telegram bot is not configured"
+    await save_db()
+    try:
+        conn = get_db()
+        try:
+            conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+        finally:
+            conn.close()
+    except Exception:
+        pass
+    fname = f"nexovip-backup-{datetime.now(timezone.utc).strftime('%Y%m%d-%H%M%S')}.db"
+    tmpdir = "/tmp" if os.path.isdir("/tmp") else "."
+    tmp = os.path.join(tmpdir, fname)
+    try:
+        shutil.copyfile(DB_FILE, tmp)
+        size = os.path.getsize(tmp)
+        caption = (
+            f"🛡 <b>NexoVIP Backup</b> ({trigger})\n"
+            f"📅 {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}\n"
+            f"📦 {_fmt_bytes(size)} • 🔗 {len(LINKS)} links"
+        )
+        with open(tmp, "rb") as f:
+            await bot.send_document(admin_id, f, visible_file_name=fname, caption=caption, parse_mode="HTML")
+        _last_backup_ts = time.time()
+        logger.info(f"[BACKUP] sent ({trigger}), {size} bytes")
+        return True, "Backup sent to Telegram"
+    except Exception as e:
+        _last_backup_fail_ts = time.time()
+        logger.error(f"Backup failed: {e}")
+        return False, f"Backup failed: {e}"
+    finally:
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
+
+async def backup_cron():
+    """بکاپ خودکار دوره‌ای بر اساس تنظیم backup_interval_hours (۰ = خاموش)."""
+    global _last_backup_ts
+    while True:
+        try:
+            await asyncio.sleep(60)
+            try:
+                iv = int(float(CONFIG.get("backup_interval_hours") or 0))
+            except (TypeError, ValueError):
+                iv = 0
+            if iv <= 0:
+                continue
+            now = time.time()
+            if _last_backup_ts and now - _last_backup_ts < iv * 3600 - 30:
+                continue
+            if now - _last_backup_fail_ts < 600:
+                continue  # بعد از شکست، ۱۰ دقیقه صبر کن تا اسپم نشه
+            ok, _ = await do_backup("auto")
+            if ok:
+                _last_backup_ts = now
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:
+            logger.error(f"backup_cron: {e}")
+
+@app.post("/api/backup/now")
+async def api_backup_now(_=Depends(require_auth)):
+    ok, msg = await do_backup("manual")
+    if not ok:
+        raise HTTPException(status_code=400, detail=msg)
+    return {"ok": True, "detail": msg}
+
+@app.post("/api/backup/restore")
+async def api_backup_restore(file: UploadFile = File(...), _=Depends(require_auth)):
+    data = await file.read()
+    if len(data) < 100 or len(data) > 100 * 1024 * 1024:
+        raise HTTPException(status_code=400, detail="Invalid backup file size")
+    if not data.startswith(b"SQLite format 3\x00"):
+        raise HTTPException(status_code=400, detail="Not a valid SQLite database file")
+    tmp = DB_FILE + ".restore-tmp"
+    with open(tmp, "wb") as f:
+        f.write(data)
+    try:
+        check = sqlite3.connect(tmp)
+        try:
+            row = check.execute("PRAGMA integrity_check").fetchone()
+            if not row or row[0] != "ok":
+                raise HTTPException(status_code=400, detail="Backup file failed integrity check")
+            has_links = check.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='links'").fetchone()
+            if not has_links:
+                raise HTTPException(status_code=400, detail="Backup file is not a NexoVIP database")
+        finally:
+            check.close()
+    except HTTPException:
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
+        raise
+    except Exception as e:
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
+        raise HTTPException(status_code=400, detail=f"Cannot read backup: {e}")
+    async with DB_LOCK:
+        os.replace(tmp, DB_FILE)
+        for suffix in ("-wal", "-shm"):
+            try:
+                os.remove(DB_FILE + suffix)
+            except OSError:
+                pass
+    load_db()
+    await send_tg_message(f"♻️ <b>Database restored from backup</b>\n🔗 Links: <b>{len(LINKS)}</b>")
+    return {"ok": True, "links": len(LINKS)}
+
 async def telegram_notifier_cron():
     while True:
         try:
@@ -1542,14 +1675,58 @@ async def ping_check(host: str, port: int = 443):
     except Exception:
         return {"host": host, "port": port, "ms": None, "reachable": False}
 
+# ── Login rate limiter: بعد از چند تلاش ناموفق، IP موقتاً بن می‌شود ─────────
+LOGIN_MAX_FAILS = 5
+LOGIN_WINDOW_SEC = 15 * 60
+LOGIN_BAN_SEC = 15 * 60
+_login_rl_state: dict = {}
+_login_rl_lock = asyncio.Lock()
+
+async def _rl_precheck(ip: str):
+    async with _login_rl_lock:
+        st = _login_rl_state.get(ip)
+        if not st:
+            return
+        now = time.time()
+        until = st.get("banned_until", 0)
+        if until > now:
+            mins = int((until - now) // 60) + 1
+            raise HTTPException(
+                status_code=429,
+                detail=f"Too many failed attempts. Try again in {mins} min",
+                headers={"Retry-After": str(int(until - now) + 1)},
+            )
+
+async def _rl_fail(ip: str):
+    async with _login_rl_lock:
+        now = time.time()
+        st = _login_rl_state.setdefault(ip, {"fails": [], "banned_until": 0})
+        st["fails"] = [t for t in st["fails"] if now - t < LOGIN_WINDOW_SEC]
+        st["fails"].append(now)
+        if len(st["fails"]) >= LOGIN_MAX_FAILS:
+            st["banned_until"] = now + LOGIN_BAN_SEC
+            st["fails"] = []
+            logger.warning(f"[SECURITY] IP {ip} banned for {LOGIN_BAN_SEC // 60} min after {LOGIN_MAX_FAILS} failed logins")
+        # پاک‌سازی آی‌پی‌های قدیمی که دیگر فعال نیستند
+        for k in [k for k, v in _login_rl_state.items()
+                  if now - max(v.get("banned_until", 0), max(v["fails"], default=0)) > 2 * LOGIN_BAN_SEC]:
+            _login_rl_state.pop(k, None)
+
+async def _rl_clear(ip: str):
+    async with _login_rl_lock:
+        _login_rl_state.pop(ip, None)
+
 @app.post("/api/login")
 async def api_login(request: Request):
     body = await request.json()
     password = str(body.get("password") or "")
     ip = get_request_ip(request)
+    await _rl_precheck(ip)
     if hash_password(password) != AUTH["password_hash"]:
+        await _rl_fail(ip)
         await send_tg_message(f"⚠️ <b>تلاش ناموفق برای ورود به پنل</b>\nIP: <code>{html.escape(ip)}</code>")
         raise HTTPException(status_code=401, detail="Invalid password")
+    await _rl_clear(ip)
     token = await create_session()
     resp = JSONResponse({"ok": True})
     resp.set_cookie(key=SESSION_COOKIE, value=token, max_age=SESSION_TTL, httponly=True, samesite="lax", path="/")
@@ -1612,6 +1789,7 @@ async def get_settings(_=Depends(require_auth)):
         "telegram_admin_id": CONFIG["telegram_admin_id"],
         "railway_token": CONFIG.get("railway_token", ""),
         "notify_connections": CONFIG.get("notify_connections", "0") in ("1", "true", "True", True),
+        "backup_interval_hours": CONFIG.get("backup_interval_hours", "0"),
     }
 
 @app.post("/api/settings")
@@ -1628,6 +1806,12 @@ async def update_settings(request: Request, _=Depends(require_auth)):
         CONFIG["railway_token"] = (body.get("railway_token") or "").strip()
     if "notify_connections" in body:
         CONFIG["notify_connections"] = "1" if body.get("notify_connections") else "0"
+    if "backup_interval_hours" in body:
+        try:
+            iv = float(body.get("backup_interval_hours") or 0)
+        except (TypeError, ValueError):
+            iv = 0
+        CONFIG["backup_interval_hours"] = str(max(0, min(iv, 168)))
     await save_db()
     await restart_telegram_bot()
     return {"ok": True}
@@ -1864,10 +2048,88 @@ async def fetch_public_ip() -> str:
     _public_ip_cache["fail_ts"] = now
     return ""
 
+_net_last = {"ts": time.time(), "recv": psutil.net_io_counters().bytes_recv, "sent": psutil.net_io_counters().bytes_sent}
+
+def net_speeds_bps():
+    """سرعت لحظه‌ای شبکه (بایت بر ثانیه) از دلتای net_io_counters بین دو فراخوانی."""
+    global _net_last
+    try:
+        c = psutil.net_io_counters()
+        now = time.time()
+        dt = max(now - _net_last["ts"], 1e-6)
+        rx = max(0, c.bytes_recv - _net_last["recv"]) / dt
+        tx = max(0, c.bytes_sent - _net_last["sent"]) / dt
+        _net_last = {"ts": now, "recv": c.bytes_recv, "sent": c.bytes_sent}
+        return int(rx), int(tx)
+    except Exception:
+        return 0, 0
+
+def disk_usage_info():
+    """وضعیت حجم دیسک/Volume — روی /data اگر volume نصب باشد وگرنه ریشه."""
+    root = "/data" if os.path.isdir("/data") else "/"
+    try:
+        u = psutil.disk_usage(root)
+        return {"total": u.total, "free": u.free, "percent": u.percent}
+    except Exception:
+        return {"total": 0, "free": 0, "percent": 0.0}
+
+def qr_svg_data_uri(data: str) -> str:
+    """QR به‌صورت SVG داخلی (بدون سرویس خارجی). اگر کتابخانه نبود، رشتهٔ خالی."""
+    if not _QR_AVAILABLE or not data:
+        return ""
+    try:
+        img = qrcode.make(data, image_factory=qrcode.image.svg.SvgPathImage, box_size=14, border=2)
+        buf = io.BytesIO()
+        img.save(buf)
+        return "data:image/svg+xml;base64," + base64.b64encode(buf.getvalue()).decode()
+    except Exception:
+        return ""
+
+@app.get("/api/qr")
+async def api_qr(data: str = "", _=Depends(require_auth)):
+    if not data:
+        raise HTTPException(status_code=400, detail="data is required")
+    if len(data) > 2048:
+        raise HTTPException(status_code=400, detail="data too long")
+    svg = qr_svg_data_uri(data)
+    if not svg:
+        return RedirectResponse(f"https://api.qrserver.com/v1/create-qr-code/?size=280x280&data={quote(data)}")
+    raw = base64.b64decode(svg.split(",", 1)[1])
+    return Response(content=raw, media_type="image/svg+xml")
+
+@app.post("/api/db/vacuum")
+async def api_db_vacuum(_=Depends(require_auth)):
+    before = 0
+    try:
+        before = os.path.getsize(DB_FILE)
+    except OSError:
+        pass
+    async with DB_LOCK:
+        conn = get_db()
+        try:
+            conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+            conn.execute("VACUUM")
+            conn.commit()
+        finally:
+            conn.close()
+    after = before
+    try:
+        after = os.path.getsize(DB_FILE)
+    except OSError:
+        pass
+    return {"ok": True, "before_mb": round(before / (1024 * 1024), 2), "after_mb": round(after / (1024 * 1024), 2)}
+
 @app.get("/stats")
 async def get_stats(_=Depends(require_auth)):
     async with connections_lock:
         conn_count = len(connections)
+    rx_bps, tx_bps = net_speeds_bps()
+    disk_info = disk_usage_info()
+    try:
+        db_size = os.path.getsize(DB_FILE)
+    except OSError:
+        db_size = 0
+    today_key = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     return {
         "active_connections": conn_count,
         "total_traffic_mb": round(stats["total_bytes"] / (1024 * 1024), 2),
@@ -1883,6 +2145,14 @@ async def get_stats(_=Depends(require_auth)):
         "hourly_traffic": dict(hourly_traffic),
         "server_ip": await fetch_public_ip(),
         "local_ip": local_interface_ip(),
+        "net_rx_bps": rx_bps,
+        "net_tx_bps": tx_bps,
+        "today_traffic_mb": round(daily_traffic.get(today_key, 0) / (1024 * 1024), 2),
+        "disk_total_gb": round(disk_info["total"] / (1024 * 1024 * 1024), 2),
+        "disk_free_gb": round(disk_info["free"] / (1024 * 1024 * 1024), 2),
+        "disk_percent": disk_info["percent"],
+        "db_size_mb": round(db_size / (1024 * 1024), 2),
+        "last_backup_min_ago": int((time.time() - _last_backup_ts) // 60) if _last_backup_ts else -1,
     }
 
 @app.post("/api/links")
@@ -2196,6 +2466,25 @@ def generate_landing_page(link: dict, uid: str, addresses: list[str]) -> str:
     sub_url = f"https://{get_domain()}/sub/{uid}"
     configs_json = json.dumps(configs)
 
+    # Offline QR: همهٔ QRها سمت سرور با SVG ساخته می‌شن — نه سرویس خارجی، نه لو رفتن لینک
+    qr_sub_uri = qr_svg_data_uri(sub_url)
+    if qr_sub_uri:
+        qr_img_tag = qr_sub_uri
+    else:
+        qr_img_tag = f"https://api.qrserver.com/v1/create-qr-code/?size=240x240&color=000000&bgcolor=ffffff&data={quote(sub_url)}"
+    qr_map = {}
+    for cfg in configs:
+        u = qr_svg_data_uri(cfg)
+        if u:
+            qr_map[cfg] = u
+    if qr_sub_uri:
+        qr_map[sub_url] = qr_sub_uri
+    qr_map_json = json.dumps(qr_map)
+
+    # Epoch انقضا برای شمارش معکوس زندهٔ کلاینت‌ساید
+    _exp_dt = parse_expires_at(expires_at_str)
+    expire_ts_attr = int(_exp_dt.timestamp()) if _exp_dt else 0
+
     is_active = link["active"]
     status_text = "Active" if is_active else "Inactive"
     
@@ -2470,7 +2759,7 @@ def generate_landing_page(link: dict, uid: str, addresses: list[str]) -> str:
             </div>
             <div class="info-box">
                 <div class="info-box-label">Expires</div>
-                <div class="info-box-val gold">{expiry_str}</div>
+                <div class="info-box-val gold" id="exp-val" data-exp-ts="{expire_ts_attr}">{expiry_str}</div>
                 <div class="info-box-sub">{expiry_date_str}</div>
             </div>
         </div>
@@ -2480,7 +2769,7 @@ def generate_landing_page(link: dict, uid: str, addresses: list[str]) -> str:
     <div class="qr-card">
         <div class="qr-label">Scan to Add</div>
         <div class="qr-wrap">
-            <img src="https://api.qrserver.com/v1/create-qr-code/?size=240x240&color=000000&bgcolor=ffffff&data={quote(sub_url)}" alt="QR">
+            <img src="{qr_img_tag}" alt="QR">
         </div>
         <div class="qr-label">Subscription Link</div>
         <div class="sub-link-display" onclick="copySub()">{get_domain()}/sub/{uid}</div>
@@ -2545,6 +2834,32 @@ def generate_landing_page(link: dict, uid: str, addresses: list[str]) -> str:
 
 <script>
     const configs = {configs_json};
+    window.QR_MAP = {qr_map_json};
+
+    // شمارش معکوس زندهٔ انقضا
+    (function() {{
+      const el = document.getElementById('exp-val');
+      if (!el) return;
+      const ts = parseInt(el.getAttribute('data-exp-ts') || '0');
+      if (!ts) return;
+      function tick() {{
+        let s = Math.floor(ts - Date.now() / 1000);
+        if (s <= 0) {{
+          el.textContent = 'Expired';
+          el.classList.remove('gold');
+          el.classList.add('red');
+          clearInterval(iv);
+          return;
+        }}
+        const d = Math.floor(s / 86400); s %= 86400;
+        const h = Math.floor(s / 3600); s %= 3600;
+        const m = Math.floor(s / 60);
+        const sec = s % 60;
+        el.textContent = (d > 0 ? d + 'd ' : '') + h + 'h ' + m + 'm ' + sec + 's';
+      }}
+      tick();
+      const iv = setInterval(tick, 1000);
+    }})();
     const subUrl = "https://{get_domain()}/sub/{uid}";
     (function(){{
         var sf=document.getElementById('starfield');
@@ -2751,7 +3066,7 @@ def generate_landing_page(link: dict, uid: str, addresses: list[str]) -> str:
     }}
 
     function showQR(txt, name) {{
-        document.getElementById('qr-modal-img').src = 'https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=' + encodeURIComponent(txt);
+        document.getElementById('qr-modal-img').src = (window.QR_MAP && window.QR_MAP[txt]) || ('https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=' + encodeURIComponent(txt));
         document.getElementById('qr-modal-name').textContent = name || '';
         document.getElementById('qr-modal').classList.add('show');
     }}
@@ -3678,6 +3993,18 @@ body[dir="rtl"]{direction:rtl;text-align:right}
   color:var(--text);direction:ltr;text-align:start;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;user-select:all}
 .host-ip-val.loading{color:var(--text3);animation:pulseDot 1.2s ease-in-out infinite}
 @media(max-width:900px){.host-ip-grid{grid-template-columns:1fr;gap:8px}}
+/* Live bandwidth */
+.bw-card .card-hd{flex-wrap:wrap;gap:8px}
+.bw-now{display:flex;gap:6px;flex-wrap:wrap}
+.bw-pill{display:inline-flex;align-items:center;gap:5px;padding:5px 10px;border-radius:999px;font-size:11px;
+  font-weight:700;background:var(--surface3);border:1px solid var(--border);color:var(--text2);
+  font-variant-numeric:tabular-nums;direction:ltr}
+.bw-pill.up{color:var(--gold2);border-color:rgba(255,48,72,.25)}
+.bw-pill.down{color:var(--green);border-color:rgba(73,229,141,.25)}
+.bw-chart-wrap{height:130px;width:100%}
+.meta-btn{cursor:pointer;color:var(--gold2);transition:border-color .2s,box-shadow .2s;font-family:inherit;font-size:11.5px}
+.meta-btn:hover{border-color:var(--border2);box-shadow:var(--gold-glow)}
+.meta-btn:disabled{opacity:.5;cursor:wait}
 @media(max-width:768px){
   .dash-live-pill{padding:6px 12px;font-size:10px}
   .stat-card.premium{padding:18px 18px 16px}
@@ -4047,15 +4374,32 @@ body{background:radial-gradient(circle at 78% -8%,rgba(255,36,72,.12),transparen
             <div class="sys-metric-hd"><span class="sys-metric-name" data-en="Memory" data-fa="حافظه">Memory</span><span class="sys-metric-val" id="mem-v">-%</span></div>
             <div class="sys-bar-xl"><div class="sys-fill-xl" id="mem-b"></div></div>
           </div>
+          <div class="sys-metric">
+            <div class="sys-metric-hd"><span class="sys-metric-name" data-en="Disk / Volume" data-fa="دیسک / Volume">Disk / Volume</span><span class="sys-metric-val" id="disk-v">-%</span></div>
+            <div class="sys-bar-xl"><div class="sys-fill-xl" id="disk-b"></div></div>
+          </div>
           <div class="sys-meta">
             <div class="meta-chip"><span>⏱</span><span id="sv-uptime">-</span></div>
             <div class="meta-chip"><span>🌐</span><span id="sv-domain">-</span></div>
+            <div class="meta-chip"><span>🗄</span><span id="db-size">-</span></div>
+            <button class="meta-chip meta-btn" id="vacuum-btn" onclick="vacuumDB()"><span>🧹</span><span data-en="VACUUM" data-fa="بهینه‌سازی DB">VACUUM</span></button>
           </div>
         </div>
         <div class="card">
           <div class="card-hd"><div class="card-title" data-en="Hourly Traffic" data-fa="ترافیک ساعتی">Hourly Traffic</div></div>
           <div class="chart-container"><canvas id="tc"></canvas></div>
         </div>
+      </div>
+      <div class="card bw-card">
+        <div class="card-hd">
+          <div class="card-title" data-en="Live Bandwidth" data-fa="پهنای‌باند زنده">Live Bandwidth</div>
+          <div class="bw-now">
+            <span class="bw-pill down">↓ <span id="bw-rx">-</span></span>
+            <span class="bw-pill up">↑ <span id="bw-tx">-</span></span>
+            <span class="bw-pill today"><span data-en="Today" data-fa="امروز">Today</span>: <span id="bw-today">-</span></span>
+          </div>
+        </div>
+        <div class="bw-chart-wrap"><canvas id="net-chart"></canvas></div>
       </div>
       <div class="card host-card">
         <div class="card-hd">
@@ -4183,6 +4527,29 @@ body{background:radial-gradient(circle at 78% -8%,rgba(255,36,72,.12),transparen
           <div class="fg"><label class="fl" data-en="Current Password" data-fa="رمز فعلی">Current Password</label><input class="fi" type="password" id="cpw" placeholder="Current password"></div>
           <div class="fg"><label class="fl" data-en="New Password" data-fa="رمز جدید">New Password</label><input class="fi" type="password" id="npw" placeholder="Min 4 chars"></div>
           <button class="btn btn-gold" onclick="chgPw()" style="margin-top:10px;width:100%;justify-content:center" data-en="Update Password" data-fa="بروزرسانی رمز">Update Password</button>
+        </div>
+      </div>
+      <div class="card" style="margin-top:14px">
+        <div class="card-hd">
+          <div class="card-title" data-en="🛡 Backup &amp; Restore" data-fa="🛡 بکاپ و بازیابی">🛡 Backup &amp; Restore</div>
+          <span style="font-size:10.5px;color:var(--text3)" id="bk-last">-</span>
+        </div>
+        <div style="font-size:11px;color:var(--text3);margin-bottom:12px;line-height:1.6" data-en="Automatic database backups are sent to the Telegram admin chat. Keep at least one backup file — on Railway a restore can save all your subscriptions." data-fa="بکاپ خودکار دیتابیس به چت ادمین تلگرام فرستاده می‌شود. حداقل یک فایل بکاپ نگه دار — روی Railway بازیابی می‌تواند همهٔ ساب‌ها را نجات دهد.">Automatic database backups are sent to the Telegram admin chat.</div>
+        <div class="fg">
+          <label class="fl" data-en="Auto-backup interval" data-fa="فاصلهٔ بکاپ خودکار">Auto-backup interval</label>
+          <select class="fs" id="bk-interval" onchange="saveBackupInterval()">
+            <option value="0" data-en="Off" data-fa="خاموش">Off</option>
+            <option value="6">6h</option>
+            <option value="12">12h</option>
+            <option value="24" data-en="24h (daily)" data-fa="۲۴ ساعت (روزانه)">24h (daily)</option>
+          </select>
+        </div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px">
+          <button class="btn btn-gold btn-sm" id="bk-now-btn" onclick="backupNow()" data-en="⬆ Backup Now" data-fa="⬆ بکاپ الان">⬆ Backup Now</button>
+          <label class="btn btn-danger btn-sm" style="cursor:pointer;margin:0">
+            <span data-en="♻ Restore from file" data-fa="♻ بازیابی از فایل">♻ Restore from file</span>
+            <input type="file" id="bk-file" accept=".db,application/x-sqlite3" style="display:none" onchange="restoreBackup(this)">
+          </label>
         </div>
       </div>
       <div class="card" style="margin-top:14px">
@@ -4466,6 +4833,8 @@ let cf='all';
 let sData={};
 let tChart=null;
 let iChart=null;
+let nChart=null;
+const netHist={rx:[],tx:[],t:[]};
 
 // Generates visually distinct colors using the golden-angle rotation so that
 // adjacent chart segments never look alike, regardless of how many users exist.
@@ -4597,6 +4966,12 @@ function fmtB(b){
   if(!b||b===0)return'0 B';
   return b>=1073741824?(b/1073741824).toFixed(2)+' GB':
          b>=1048576?(b/1048576).toFixed(2)+' MB':(b/1024).toFixed(1)+' KB';
+}
+function fmtBps(b){
+  b=b||0;
+  if(b>=1048576)return(b/1048576).toFixed(2)+' MB/s';
+  if(b>=1024)return(b/1024).toFixed(1)+' KB/s';
+  return Math.round(b)+' B/s';
 }
 function fmtLim(b){
   if(!b||b===0)return'∞';
@@ -4890,6 +5265,7 @@ async function loadSettings(){
       if($m('rw-tg-admin'))$m('rw-tg-admin').value=d.telegram_admin_id||'';
       if($m('rw-token'))$m('rw-token').value=d.railway_token||'';
       if($m('rw-tg-notify-conn'))$m('rw-tg-notify-conn').checked=!!d.notify_connections;
+      if($m('bk-interval'))$m('bk-interval').value=String(d.backup_interval_hours||'0');
     }
   }catch(e){}
 }
@@ -5015,6 +5391,19 @@ async function loadStats(){
     $m('sv-links').textContent=sData.links_count||0;
     if($m('sv-conn'))$m('sv-conn').textContent=(sData.active_connections!=null?sData.active_connections:0);
     if($m('sv-req'))$m('sv-req').textContent=(sData.total_requests||0).toLocaleString();
+    if($m('bw-rx'))$m('bw-rx').textContent=fmtBps(sData.net_rx_bps||0);
+    if($m('bw-tx'))$m('bw-tx').textContent=fmtBps(sData.net_tx_bps||0);
+    if($m('bw-today'))$m('bw-today').textContent=(sData.today_traffic_mb!=null?sData.today_traffic_mb:'-')+' MB';
+    netHist.rx.push(sData.net_rx_bps||0);netHist.tx.push(sData.net_tx_bps||0);
+    netHist.t.push(new Date().toLocaleTimeString([],{minute:'2-digit',second:'2-digit'}));
+    if(netHist.rx.length>60){netHist.rx.shift();netHist.tx.shift();netHist.t.shift()}
+    updNetChart();
+    if($m('bk-last')){
+      const ago=sData.last_backup_min_ago;
+      $m('bk-last').textContent=(ago!=null&&ago>=0)
+        ?(lang==='fa'?'آخرین بکاپ: '+ago+' دقیقه پیش':'Last backup: '+ago+'m ago')
+        :(lang==='fa'?'هنوز بکاپی گرفته نشده':'No backup yet');
+    }
     if($m('host-pub-ip')){$m('host-pub-ip').textContent=sData.server_ip||'…';$m('host-pub-ip').classList.remove('loading')}
     if($m('host-loc-ip')){$m('host-loc-ip').textContent=sData.local_ip||'…';$m('host-loc-ip').classList.remove('loading')}
     if($m('host-dom')){$m('host-dom').textContent=sData.domain||'…';$m('host-dom').classList.remove('loading')}
@@ -5037,8 +5426,15 @@ async function loadStats(){
       $m('mem-v').textContent=m.toFixed(1)+'%';$m('mem-v').style.color=mc;
       $m('mem-b').style.width=Math.min(m,100)+'%';$m('mem-b').style.background=mc;
     }
+    if(sData.disk_percent!==undefined){
+      const d=sData.disk_percent;
+      const dc=d>85?'var(--red)':d>70?'var(--yellow)':'var(--gold2)';
+      if($m('disk-v')){$m('disk-v').textContent=d.toFixed(0)+'%';$m('disk-v').style.color=dc}
+      if($m('disk-b')){$m('disk-b').style.width=Math.min(d,100)+'%';$m('disk-b').style.background=dc}
+    }
+    if($m('db-size')&&sData.db_size_mb!==undefined)$m('db-size').textContent=sData.db_size_mb+' MB';
     if($m('sys-st')){
-      const bad=(sData.cpu_percent!==undefined&&sData.cpu_percent>90)||(sData.memory_percent!==undefined&&sData.memory_percent>90);
+      const bad=(sData.cpu_percent!==undefined&&sData.cpu_percent>90)||(sData.memory_percent!==undefined&&sData.memory_percent>90)||(sData.disk_percent!==undefined&&sData.disk_percent>90);
       $m('sys-st').textContent=bad?(lang==='fa'?'فشار بالا':'HIGH LOAD'):(lang==='fa'?'سالم':'HEALTHY');
       $m('sys-st').classList.toggle('warn',bad);
     }
@@ -5067,6 +5463,52 @@ async function chgPw(){
   }catch(e){toast(e.message,true)}
 }
 
+async function vacuumDB(){
+  const btn=$m('vacuum-btn');if(btn)btn.disabled=true;
+  try{
+    const r=await fetch('/api/db/vacuum',{method:'POST'});
+    if(!r.ok)throw new Error();
+    const d=await r.json();
+    toast(lang==='fa'?('بهینه‌سازی شد: '+d.before_mb+' ← '+d.after_mb+' MB'):('Vacuumed: '+d.before_mb+' → '+d.after_mb+' MB'));
+    loadStats();
+  }catch(e){toast('Vacuum failed',true)}
+  finally{if(btn)btn.disabled=false}
+}
+
+async function backupNow(){
+  const btn=$m('bk-now-btn');if(btn)btn.disabled=true;
+  try{
+    const r=await fetch('/api/backup/now',{method:'POST'});
+    const d=await r.json().catch(()=>({}));
+    if(!r.ok)throw new Error(d.detail||'Backup failed');
+    toast(lang==='fa'?'بکاپ به تلگرام ارسال شد ✅':'Backup sent to Telegram ✅');
+  }catch(e){toast(e.message||'Backup failed',true)}
+  finally{if(btn)btn.disabled=false}
+}
+
+async function restoreBackup(input){
+  const f=input.files&&input.files[0];
+  if(!f)return;
+  if(!confirm(lang==='fa'?'کل دیتابیس با این بکاپ جایگزین می‌شود! مطمئنی؟':'This will REPLACE the whole database with this backup! Continue?')){input.value='';return}
+  const fd=new FormData();fd.append('file',f);
+  try{
+    const r=await fetch('/api/backup/restore',{method:'POST',body:fd});
+    const d=await r.json().catch(()=>({}));
+    if(!r.ok)throw new Error(d.detail||'Restore failed');
+    toast(lang==='fa'?('بازیابی شد ✅ ('+d.links+' ساب)'):('Restored ✅ ('+d.links+' links)'));
+    await loadLinks();await loadStats();await loadAddrs();
+  }catch(e){toast(e.message||'Restore failed',true)}
+  finally{input.value=''}
+}
+
+function saveBackupInterval(){
+  const sel=$m('bk-interval');
+  const v=sel?(sel.value||'0'):'0';
+  fetch('/api/settings',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({backup_interval_hours:v})})
+    .then(()=>toast(lang==='fa'?'زمان‌بندی بکاپ ذخیره شد':'Backup schedule saved'))
+    .catch(()=>toast('Failed to save',true));
+}
+
 function initChart(){
   const ctx=$m('tc');
   if(!ctx||tChart)return;
@@ -5082,6 +5524,23 @@ function initChart(){
     }
   });
 
+  const ctxN=$m('net-chart');
+  if(ctxN&&!nChart){
+    nChart=new Chart(ctxN,{
+      type:'line',
+      data:{labels:[],datasets:[
+        {label:'↓',data:[],borderColor:'#49e58d',backgroundColor:'rgba(73,229,141,0.10)',fill:true,tension:.35,pointRadius:0,borderWidth:1.5},
+        {label:'↑',data:[],borderColor:'#ef2a3a',backgroundColor:'rgba(239,42,58,0.10)',fill:true,tension:.35,pointRadius:0,borderWidth:1.5}
+      ]},
+      options:{responsive:true,maintainAspectRatio:false,animation:false,
+        plugins:{legend:{display:true,position:'top',labels:{color:'rgba(255,255,255,0.5)',boxWidth:8,font:{size:9}}}},
+        scales:{
+          x:{grid:{display:false},ticks:{color:'rgba(239,42,58,0.35)',font:{size:9},maxTicksLimit:8}},
+          y:{grid:{color:'rgba(239,42,58,0.06)'},ticks:{color:'rgba(239,42,58,0.35)',font:{size:9},callback:v=>fmtBps(v)},beginAtZero:true}
+        }
+      }
+    });
+  }
   const ctx2=$m('inbound-chart');
   if(ctx2&&!iChart){
     iChart=new Chart(ctx2,{
@@ -5112,6 +5571,14 @@ function updChart(){
   tChart.data.labels=entries.map(x=>{const p=x[0].split(' ');return p.length>1?p[1]:p[0]});
   tChart.data.datasets[0].data=entries.map(x=>Math.round(x[1]/1048576));
   tChart.update();
+}
+
+function updNetChart(){
+  if(!nChart)return;
+  nChart.data.labels=netHist.t.slice();
+  nChart.data.datasets[0].data=netHist.rx.slice();
+  nChart.data.datasets[1].data=netHist.tx.slice();
+  nChart.update('none');
 }
 
 async function loadAddrs(){
