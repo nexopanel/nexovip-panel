@@ -123,8 +123,7 @@ Every config link is also a **subscription**: point any client at
 ├── main.py               🔥 The whole panel — FastAPI app + Xray relay + UI
 ├── xhttp_transport.py    🚀 XHTTP (packet-up / stream-up) transport
 ├── requirements.txt      📦 Dependencies
-├── Procfile              ⚙️ Railway/Render start command
-├── render.yaml           🎯 Render blueprint
+├── Procfile              ⚙️ Railway start command
 ├── railway_ips.txt       🌐 Clean Railway IP pool
 └── client/               📸 Client screenshots
 ```

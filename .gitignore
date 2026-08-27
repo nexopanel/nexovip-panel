@@ -24,6 +24,7 @@ integrations.md
 dist/
 dist-ssr/
 *.local
+tsconfig.tsbuildinfo
 
 # ── Logs ────────────────────────────────────────────────────────
 logs
