@@ -242,7 +242,7 @@ MIN_PORT, MAX_PORT = 1, 65535
 AUTH_TYPES = ("vless", "trojan")
 DEFAULT_AUTH = "vless"
 
-TRANSPORTS = ("ws", "xhttp-packet-up", "xhttp-stream-up")
+TRANSPORTS = ("ws", "xhttp-packet-up", "xhttp-stream-up", "xhttp-auto", "reality")
 DEFAULT_TRANSPORT = "ws"
 
 PROTOCOLS = tuple(f"{a}-{t}" for a in AUTH_TYPES for t in TRANSPORTS)
@@ -278,6 +278,8 @@ for _auth in AUTH_TYPES:
     DEFAULT_ALPN_BY_PROTOCOL[f"{_auth}-ws"] = "http/1.1"
     DEFAULT_ALPN_BY_PROTOCOL[f"{_auth}-xhttp-packet-up"] = "h2,http/1.1"
     DEFAULT_ALPN_BY_PROTOCOL[f"{_auth}-xhttp-stream-up"] = "h2,http/1.1"
+    DEFAULT_ALPN_BY_PROTOCOL[f"{_auth}-xhttp-auto"] = "h2,http/1.1"
+DEFAULT_ALPN_BY_PROTOCOL["vless-reality"] = "h2,http/1.1"
 del _auth
 
 # ═══════════════════ ساختار «variants» — هر لینک می‌تونه هم‌زمان هم VLESS هم Trojan ═══════════════════
@@ -330,11 +332,19 @@ def sanitize_reality(raw: dict | None) -> dict:
     sni = str(r.get("sni") or "").strip()
     if not re.match(r'^[a-zA-Z0-9\-_.]+$', sni):
         sni = ""
+    host = str(r.get("host") or "").strip()
+    if host and not re.match(r'^[a-zA-Z0-9\-_.]+$', host):
+        host = ""
+    mode = str(r.get("mode") or "auto").strip()
+    if mode not in ("auto", "packet-up", "stream-up"):
+        mode = "auto"
     out = {
         "enabled": bool(r.get("enabled")) and bool(sni),
         "sni": sni,
+        "host": host or sni,
         "port": _port("port"),
         "dest_port": _port("dest_port") or 443,
+        "mode": mode,
     }
     for k in ("private_key", "public_key", "short_id"):
         val = str(r.get(k) or "").strip()
@@ -982,13 +992,13 @@ def generate_vless_link(
     )
     if use_reality:
         use_port = r_cfg["port"]
-        mode = "stream-up" if transport == "xhttp-stream-up" else "packet-up"
+        mode = r_cfg.get("mode") or "auto"
         params = {
             "encryption": "none",
             "security": "reality",
             "type": "xhttp",
             "mode": mode,
-            "host": r_cfg["sni"],
+            "host": r_cfg.get("host") or r_cfg["sni"],
             "path": f"/{uuid[:8]}",
             "sni": r_cfg["sni"],
             "fp": fp if fp in FINGERPRINTS else DEFAULT_FINGERPRINT,
@@ -998,6 +1008,11 @@ def generate_vless_link(
         }
         query = "&".join(f"{k}={quote(str(v))}" for k, v in params.items())
         return f"vless://{uuid}@{addr}:{use_port}?{query}#{quote(remark)}"
+
+    if transport == "reality":
+        # REALITY selected but keys/SNI not provisioned yet (Xray generates them
+        # async) -> emit nothing rather than a broken TLS fallback config
+        return None
 
     if transport == "ws":
         path = f"/ws/{auth}/{uuid}?ed=2048"
@@ -1062,10 +1077,11 @@ def reality_link_for_link(link: dict, uid: str, address: str = None) -> str | No
         port_ok = 1 <= int(r.get("port") or 0) <= 65535
     except (TypeError, ValueError):
         return None
-    if not (r.get("enabled") and r.get("sni") and r.get("public_key") and r.get("short_id") and port_ok):
-        return None
     vv = sanitize_variants(link.get("variants")).get("vless")
     if not vv or not vv.get("enabled"):
+        return None
+    enabled_now = bool(r.get("enabled")) or vv.get("transport") == "reality"
+    if not (enabled_now and r.get("sni") and r.get("public_key") and r.get("short_id") and port_ok):
         return None
     return generate_vless_link(
         uid,
@@ -4287,10 +4303,12 @@ body{background:radial-gradient(circle at 78% -8%,rgba(255,36,72,.12),transparen
         <div class="fr">
           <div class="fg">
             <label class="fl" data-en="Transport" data-fa="ترابرد">Transport</label>
-            <select class="fs" id="n_vless_transport" onchange="syncAlpnDefault('vless','n_vless_transport','n_vless_alpn')">
+            <select class="fs" id="n_vless_transport" onchange="syncAlpnDefault('vless','n_vless_transport','n_vless_alpn');updRlPanel('n')">
               <option value="ws">WebSocket</option>
               <option value="xhttp-packet-up">XHTTP (packet-up)</option>
               <option value="xhttp-stream-up">XHTTP (stream-up)</option>
+              <option value="xhttp-auto">XHTTP (auto)</option>
+              <option value="reality">REALITY (XHTTP)</option>
             </select>
           </div>
           <div class="fg">
@@ -4324,6 +4342,7 @@ body{background:radial-gradient(circle at 78% -8%,rgba(255,36,72,.12),transparen
               <option value="ws">WebSocket</option>
               <option value="xhttp-packet-up">XHTTP (packet-up)</option>
               <option value="xhttp-stream-up">XHTTP (stream-up)</option>
+              <option value="xhttp-auto">XHTTP (auto)</option>
             </select>
           </div>
           <div class="fg">
@@ -4348,19 +4367,24 @@ body{background:radial-gradient(circle at 78% -8%,rgba(255,36,72,.12),transparen
       <label class="fl" data-en="Port" data-fa="پورت">Port</label>
       <input class="fi" value="443" readonly style="cursor:not-allowed">
     </div>
-    <div class="fg" style="border:1px solid var(--border);border-radius:10px;padding:10px 12px;margin-top:4px">
-      <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
-        <input type="checkbox" id="n_rl_enabled" style="width:16px;height:16px;accent-color:var(--gold)" onchange="toggleRlBox('n')">
-        <label for="n_rl_enabled" style="font-weight:700;cursor:pointer">REALITY <span style="font-size:9px;color:var(--text3);font-weight:600">(VLESS + XHTTP)</span></label>
+        <div class="fg" id="n_reality_box" style="display:none;border:1px solid rgba(239,42,58,.45);border-radius:10px;padding:10px 12px;margin-top:4px;background:rgba(239,42,58,.05)">
+      <div style="font-size:11px;font-weight:800;color:#ff5a63;margin-bottom:8px;letter-spacing:.4px">🔒 REALITY · VLESS + XHTTP</div>
+      <div class="fr">
+        <div class="fg"><label class="fl" data-en="SNI (Server Name)" data-fa="SNI (نام سرور)">SNI (Server Name)</label><input class="fi" id="n_reality_sni" data-ph-en="e.g. www.microsoft.com" data-ph-fa="مثلاً www.microsoft.com" placeholder="e.g. www.microsoft.com"></div>
+        <div class="fg"><label class="fl" data-en="Host" data-fa="هاست">Host</label><input class="fi" id="n_reality_host" data-ph-en="empty = same as SNI" data-ph-fa="خالی = همان SNI" placeholder="empty = same as SNI"></div>
       </div>
-      <div id="n_rl_box" style="display:none">
-        <div class="fr">
-          <div class="fg"><label class="fl" data-en="In Port" data-fa="پورت ورودی">In Port</label><input class="fi" id="n_rl_port" type="number" min="1" max="65535" placeholder="e.g. 8443"></div>
-          <div class="fg"><label class="fl" data-en="Out Port" data-fa="پورت خروجی">Out Port</label><input class="fi" id="n_rl_dport" type="number" min="1" max="65535" value="443"></div>
-        </div>
-        <div class="fg"><label class="fl" data-en="SNI / Host" data-fa="SNI / هاست">SNI / Host</label><input class="fi" id="n_rl_sni" data-ph-en="e.g. www.microsoft.com" data-ph-fa="مثلاً www.microsoft.com" placeholder="e.g. www.microsoft.com"></div>
-        <div id="n_rl_keys" style="display:none;font-size:10px;color:var(--text3);word-break:break-all;margin-top:6px;line-height:1.5"></div>
+      <div class="fr">
+        <div class="fg"><label class="fl" data-en="In Port" data-fa="پورت ورودی">In Port</label><input class="fi" id="n_reality_port" type="number" min="1" max="65535" placeholder="e.g. 8443"></div>
+        <div class="fg"><label class="fl" data-en="Out Port" data-fa="پورت خروجی">Out Port</label><input class="fi" id="n_reality_dport" type="number" min="1" max="65535" value="443"></div>
       </div>
+      <div class="fg"><label class="fl" data-en="XHTTP Mode" data-fa="مود XHTTP">XHTTP Mode</label>
+        <select class="fs" id="n_reality_mode">
+          <option value="auto">auto (recommended)</option>
+          <option value="packet-up">packet-up</option>
+          <option value="stream-up">stream-up</option>
+        </select>
+      </div>
+      <div id="n_reality_keys" style="display:none;font-size:10px;color:var(--text3);word-break:break-all;margin-top:6px;line-height:1.5"></div>
     </div>
     <button class="btn btn-gold" onclick="createLink()" style="width:100%;justify-content:center;margin-top:12px;padding:12px" data-en="CREATE" data-fa="ایجاد">CREATE</button>
   </div>
@@ -4387,10 +4411,12 @@ body{background:radial-gradient(circle at 78% -8%,rgba(255,36,72,.12),transparen
         <div class="fr">
           <div class="fg">
             <label class="fl" data-en="Transport" data-fa="ترابرد">Transport</label>
-            <select class="fs" id="e_vless_transport" onchange="syncAlpnDefault('vless','e_vless_transport','e_vless_alpn')">
+            <select class="fs" id="e_vless_transport" onchange="syncAlpnDefault('vless','e_vless_transport','e_vless_alpn');updRlPanel('e')">
               <option value="ws">WebSocket</option>
               <option value="xhttp-packet-up">XHTTP (packet-up)</option>
               <option value="xhttp-stream-up">XHTTP (stream-up)</option>
+              <option value="xhttp-auto">XHTTP (auto)</option>
+              <option value="reality">REALITY (XHTTP)</option>
             </select>
           </div>
           <div class="fg">
@@ -4424,6 +4450,7 @@ body{background:radial-gradient(circle at 78% -8%,rgba(255,36,72,.12),transparen
               <option value="ws">WebSocket</option>
               <option value="xhttp-packet-up">XHTTP (packet-up)</option>
               <option value="xhttp-stream-up">XHTTP (stream-up)</option>
+              <option value="xhttp-auto">XHTTP (auto)</option>
             </select>
           </div>
           <div class="fg">
@@ -4449,19 +4476,24 @@ body{background:radial-gradient(circle at 78% -8%,rgba(255,36,72,.12),transparen
       <input class="fi" value="443" readonly style="cursor:not-allowed">
     </div>
     <div style="display:flex;gap:10px;margin-top:16px">
-      <div class="fg" style="border:1px solid var(--border);border-radius:10px;padding:10px 12px;margin-top:4px">
-      <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
-        <input type="checkbox" id="e_rl_enabled" style="width:16px;height:16px;accent-color:var(--gold)" onchange="toggleRlBox('e')">
-        <label for="e_rl_enabled" style="font-weight:700;cursor:pointer">REALITY <span style="font-size:9px;color:var(--text3);font-weight:600">(VLESS + XHTTP)</span></label>
+          <div class="fg" id="e_reality_box" style="display:none;border:1px solid rgba(239,42,58,.45);border-radius:10px;padding:10px 12px;margin-top:4px;background:rgba(239,42,58,.05)">
+      <div style="font-size:11px;font-weight:800;color:#ff5a63;margin-bottom:8px;letter-spacing:.4px">🔒 REALITY · VLESS + XHTTP</div>
+      <div class="fr">
+        <div class="fg"><label class="fl" data-en="SNI (Server Name)" data-fa="SNI (نام سرور)">SNI (Server Name)</label><input class="fi" id="e_reality_sni" data-ph-en="e.g. www.microsoft.com" data-ph-fa="مثلاً www.microsoft.com" placeholder="e.g. www.microsoft.com"></div>
+        <div class="fg"><label class="fl" data-en="Host" data-fa="هاست">Host</label><input class="fi" id="e_reality_host" data-ph-en="empty = same as SNI" data-ph-fa="خالی = همان SNI" placeholder="empty = same as SNI"></div>
       </div>
-      <div id="e_rl_box" style="display:none">
-        <div class="fr">
-          <div class="fg"><label class="fl" data-en="In Port" data-fa="پورت ورودی">In Port</label><input class="fi" id="e_rl_port" type="number" min="1" max="65535" placeholder="e.g. 8443"></div>
-          <div class="fg"><label class="fl" data-en="Out Port" data-fa="پورت خروجی">Out Port</label><input class="fi" id="e_rl_dport" type="number" min="1" max="65535" value="443"></div>
-        </div>
-        <div class="fg"><label class="fl" data-en="SNI / Host" data-fa="SNI / هاست">SNI / Host</label><input class="fi" id="e_rl_sni" data-ph-en="e.g. www.microsoft.com" data-ph-fa="مثلاً www.microsoft.com" placeholder="e.g. www.microsoft.com"></div>
-        <div id="e_rl_keys" style="display:none;font-size:10px;color:var(--text3);word-break:break-all;margin-top:6px;line-height:1.5"></div>
+      <div class="fr">
+        <div class="fg"><label class="fl" data-en="In Port" data-fa="پورت ورودی">In Port</label><input class="fi" id="e_reality_port" type="number" min="1" max="65535" placeholder="e.g. 8443"></div>
+        <div class="fg"><label class="fl" data-en="Out Port" data-fa="پورت خروجی">Out Port</label><input class="fi" id="e_reality_dport" type="number" min="1" max="65535" value="443"></div>
       </div>
+      <div class="fg"><label class="fl" data-en="XHTTP Mode" data-fa="مود XHTTP">XHTTP Mode</label>
+        <select class="fs" id="e_reality_mode">
+          <option value="auto">auto (recommended)</option>
+          <option value="packet-up">packet-up</option>
+          <option value="stream-up">stream-up</option>
+        </select>
+      </div>
+      <div id="e_reality_keys" style="display:none;font-size:10px;color:var(--text3);word-break:break-all;margin-top:6px;line-height:1.5"></div>
     </div>
     <button class="btn btn-gold" onclick="saveEdit()" style="flex:1;justify-content:center;padding:12px" data-en="SAVE" data-fa="ذخیره">SAVE</button>
       <button class="btn btn-danger" onclick="resetTraf()" style="padding:12px" data-en="Reset" data-fa="بازنشانی">Reset</button>
@@ -4745,7 +4777,7 @@ function renderLinks(links){
 
   tb.innerHTML=rows.map(r=>`<tr>
     <td style="color:var(--text3);font-size:10.5px">${r.i}</td>
-    <td style="font-weight:600">${esc(r.l.label)}${r.l.reality&&r.l.reality.enabled?'<span class="tag" style="background:rgba(239,42,58,.14);color:#ff5a63;border-color:rgba(239,42,58,.45);margin-inline-start:6px;font-size:9px">REALITY</span>':''}</td>
+    <td style="font-weight:600">${esc(r.l.label)}${((r.l.reality&&r.l.reality.enabled)||(r.l.variants&&r.l.variants.vless&&r.l.variants.vless.transport==='reality'))?'<span class="tag" style="background:rgba(239,42,58,.14);color:#ff5a63;border-color:rgba(239,42,58,.45);margin-inline-start:6px;font-size:9px">REALITY</span>':''}</td>
     <td><span class="tag tag-vless">${protoBadge(r.l.variants)}</span></td>
     <td><div class="pill"><span class="pill-used">${fmtB(r.u)}</span><div class="pill-bar"><div class="pill-fill" style="width:${r.pct}%;background:${r.col}"></div></div><span class="pill-lim">${fmtLim(r.lim)}</span></div></td>
     <td style="font-size:11px;font-weight:600;color:${r.mc2>0&&r.cc>=r.mc2?'var(--red)':'var(--text2)'}">${r.cc}/${r.mc2||'∞'}</td>
@@ -4796,12 +4828,17 @@ async function togLink(el){
   }catch(e){toast('Failed to toggle',true)}
 }
 
-function showAddMo(){$m('mo-add').classList.add('show')}
+function showAddMo(){
+  $m('mo-add').classList.add('show');
+  if($m('n_reality_sni'))fillRealityFields('n',null);
+}
 
 // وقتی transport یک بلاک (vless یا trojan) عوض شد، ALPN همون بلاک رو به پیش‌فرضش ببر
 const ALPN_DEFAULTS={
   'vless-ws':'http/1.1','vless-xhttp-packet-up':'h2,http/1.1','vless-xhttp-stream-up':'h2,http/1.1',
+  'vless-xhttp-auto':'h2,http/1.1','vless-reality':'h2,http/1.1',
   'trojan-ws':'http/1.1','trojan-xhttp-packet-up':'h2,http/1.1','trojan-xhttp-stream-up':'h2,http/1.1',
+  'trojan-xhttp-auto':'h2,http/1.1',
 };
 function syncAlpnDefault(auth,transportId,alpnId){
   const key=auth+'-'+$m(transportId).value;
@@ -4810,54 +4847,46 @@ function syncAlpnDefault(auth,transportId,alpnId){
 function toggleVariantBox(prefix,auth){
   $m(prefix+'_'+auth+'_box').style.display=$m(prefix+'_'+auth+'_enabled').checked?'':'none';
 }
-// ── REALITY fields ─────────────────────────────────────────────────────
+// ── REALITY (transport-driven) ─────────────────────────────────────────
 const RL_SNI_RE=/^[a-zA-Z0-9\-_.]+$/;
-function toggleRlBox(p){
-  $m(p+'_rl_box').style.display=$m(p+'_rl_enabled').checked?'':'none';
+function isRealitySel(p){const s=$m(p+'_vless_transport');return !!s&&s.value==='reality';}
+function updRlPanel(p){
+  const box=$m(p+'_reality_box');if(!box)return;
+  box.style.display=isRealitySel(p)?'':'none';
 }
 function readRealityFields(p){
+  if(!isRealitySel(p)||!$m(p+'_reality_sni'))return null;
   return{
-    enabled:$m(p+'_rl_enabled').checked,
-    sni:($m(p+'_rl_sni').value||'').trim(),
-    port:parseInt($m(p+'_rl_port').value)||0,
-    dest_port:parseInt($m(p+'_rl_dport').value)||443,
+    enabled:true,
+    sni:($m(p+'_reality_sni').value||'').trim(),
+    host:($m(p+'_reality_host').value||'').trim(),
+    port:parseInt($m(p+'_reality_port').value)||0,
+    dest_port:parseInt($m(p+'_reality_dport').value)||443,
+    mode:$m(p+'_reality_mode').value||'auto',
   };
 }
 function validReality(rl){
-  return rl.enabled && RL_SNI_RE.test(rl.sni) && rl.port>=1 && rl.port<=65535 && rl.dest_port>=1 && rl.dest_port<=65535;
+  return !!rl&&RL_SNI_RE.test(rl.sni)&&(rl.host===''||RL_SNI_RE.test(rl.host))
+    &&rl.port>=1&&rl.port<=65535&&rl.dest_port>=1&&rl.dest_port<=65535;
 }
 function fillRealityFields(p,r){
+  const box=$m(p+'_reality_box');if(!box)return;
   r=r||{};
-  $m(p+'_rl_enabled').checked=!!r.enabled;
-  $m(p+'_rl_sni').value=r.sni||'';
-  $m(p+'_rl_port').value=r.port>0?r.port:'';
-  $m(p+'_rl_dport').value=r.dest_port>0?r.dest_port:443;
-  toggleRlBox(p);
-  const keys=$m(p+'_rl_keys');
+  $m(p+'_reality_sni').value=r.sni||'';
+  $m(p+'_reality_host').value=r.host&&r.host!==r.sni?(r.host||''):'';
+  $m(p+'_reality_port').value=r.port>0?r.port:'';
+  $m(p+'_reality_dport').value=r.dest_port>0?r.dest_port:443;
+  $m(p+'_reality_mode').value=r.mode||'auto';
+  updRlPanel(p);
+  const keys=$m(p+'_reality_keys');
   if(keys){
     if(r.public_key){
       keys.style.display='';
-      keys.innerHTML='<b>🔑 '+esc(r.public_key)+'</b>'+(r.short_id?(' &nbsp;·&nbsp; 🆔 '+esc(r.short_id)):'');
+      keys.innerHTML='<b>\ud83d\udd11 '+esc(r.public_key)+'</b>'+(r.short_id?(' &nbsp;\u00b7&nbsp; \ud83c\udd94 '+esc(r.short_id)):'');
     }else{keys.style.display='none';keys.textContent='';}
   }
 }
-function readVariantFields(prefix,auth){
-  return {
-    [auth+'_enabled']: $m(prefix+'_'+auth+'_enabled').checked,
-    [auth+'_transport']: $m(prefix+'_'+auth+'_transport').value,
-    [auth+'_fingerprint']: $m(prefix+'_'+auth+'_fp').value,
-    [auth+'_alpn']: $m(prefix+'_'+auth+'_alpn').value,
-  };
-}
-function fillVariantFields(prefix,auth,variant){
-  $m(prefix+'_'+auth+'_enabled').checked=!!(variant&&variant.enabled);
-  $m(prefix+'_'+auth+'_transport').value=(variant&&variant.transport)||'ws';
-  $m(prefix+'_'+auth+'_fp').value=(variant&&variant.fingerprint)||'chrome';
-  $m(prefix+'_'+auth+'_alpn').value=(variant&&variant.alpn)||ALPN_DEFAULTS[auth+'-ws'];
-  toggleVariantBox(prefix,auth);
-}
-
-async function createLink(){
+async function createLink(){async function createLink(){
   const label=$m('nl').value.trim()||'New Link';
   if(!/^[a-zA-Z0-9\-_. ]+$/.test(label)){toast('Only English letters allowed',true);return}
   if(!$m('n_vless_enabled').checked && !$m('n_trojan_enabled').checked){toast('Enable at least one protocol (VLESS or Trojan)',true);return}
@@ -4865,8 +4894,9 @@ async function createLink(){
   const mc=parseInt($m('nc').value)||0;
   const days=parseInt($m('nd').value)||0;
   const rl=readRealityFields('n');
-  if(rl.enabled&&!validReality(rl)){toast(lang==='fa'?'REALITY: هاست SNI معتبر و پورت ورودی لازم است':'REALITY: enter a valid SNI host and In-Port',true);return}
-  const body=Object.assign({label,limit_value:v,limit_unit:'GB',max_connections:mc,days_valid:days},readVariantFields('n','vless'),readVariantFields('n','trojan'),{reality:rl});
+  if(rl&&!validReality(rl)){toast(lang==='fa'?'REALITY: SNI معتبر و پورت ورودی لازم است':'REALITY: valid SNI and In-Port required',true);return}
+  const body=Object.assign({label,limit_value:v,limit_unit:'GB',max_connections:mc,days_valid:days},readVariantFields('n','vless'),readVariantFields('n','trojan'));
+  if(rl)body.reality=rl;
   try{
     const r=await fetch('/api/links',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
     if(!r.ok)throw new Error();
@@ -4900,8 +4930,9 @@ async function saveEdit(){
   const mc=parseInt($m('ec').value)||0;
   const days=parseInt($m('ed').value)||0;
   const rl=readRealityFields('e');
-  if(rl.enabled&&!validReality(rl)){toast(lang==='fa'?'REALITY: هاست SNI معتبر و پورت ورودی لازم است':'REALITY: enter a valid SNI host and In-Port',true);return}
-  const body=Object.assign({limit_value:v,limit_unit:'GB',max_connections:mc},readVariantFields('e','vless'),readVariantFields('e','trojan'),{reality:rl});
+  if(rl&&!validReality(rl)){toast(lang==='fa'?'REALITY: SNI معتبر و پورت ورودی لازم است':'REALITY: valid SNI and In-Port required',true);return}
+  const body=Object.assign({limit_value:v,limit_unit:'GB',max_connections:mc},readVariantFields('e','vless'),readVariantFields('e','trojan'));
+  if(rl)body.reality=rl;
   if(days>0)body.days_valid=days;
   try{
     const r=await fetch('/api/links/'+uid,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});

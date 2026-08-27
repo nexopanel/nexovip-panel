@@ -164,7 +164,8 @@ def build_inbound(uid: str, link: dict) -> dict | None:
 
     vless_variant = (link.get("variants") or {}).get("vless") or {}
     transport = vless_variant.get("transport", "ws")
-    mode = "stream-up" if transport == "xhttp-stream-up" else "packet-up"
+    mode = r.get("mode") if r.get("mode") in ("auto", "packet-up", "stream-up") else (
+        "stream-up" if transport == "xhttp-stream-up" else "auto")
 
     return {
         "tag": f"in-r-{uid[:8]}",
