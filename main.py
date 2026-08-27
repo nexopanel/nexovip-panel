@@ -314,6 +314,51 @@ def sanitize_variants(variants: dict | None) -> dict:
         result["vless"]["enabled"] = True  # حداقل یکی باید فعال بمونه
     return result
 
+def sanitize_reality(raw: dict | None) -> dict:
+    """فیلدهای اینباند REALITY را نرمال‌سازی می‌کند. کلیدها فقط سمت سرور زندگی
+    می‌کنند؛ هر وقت نباشند، هستهٔ واقعی Xray (reality_xray.py) آن‌ها را با
+    `xray x25519` تولید و ذخیره می‌کند — هیچ کلید ساختگی جایی ساخته نمی‌شود."""
+    r = raw if isinstance(raw, dict) else {}
+
+    def _port(key):
+        try:
+            p = int(r.get(key) or 0)
+        except (TypeError, ValueError):
+            p = 0
+        return p if 1 <= p <= 65535 else 0
+
+    sni = str(r.get("sni") or "").strip()
+    if not re.match(r'^[a-zA-Z0-9\-_.]+$', sni):
+        sni = ""
+    out = {
+        "enabled": bool(r.get("enabled")) and bool(sni),
+        "sni": sni,
+        "port": _port("port"),
+        "dest_port": _port("dest_port") or 443,
+    }
+    for k in ("private_key", "public_key", "short_id"):
+        val = str(r.get(k) or "").strip()
+        if val:
+            out[k] = val[:128]
+    return out
+
+def merge_reality(cur: dict | None, patch: dict | None) -> dict:
+    """PATCH جزئی Reality: فیلدهای فرستاده‌شده اعمال می‌شوند و بقیهٔ فیلدها
+    (از جمله کلیدهایی که Xray قبلاً ساخته) دست‌نخورده می‌مانند."""
+    merged = sanitize_reality(cur)
+    if isinstance(patch, dict):
+        for k in ("enabled", "sni", "port", "dest_port"):
+            if k in patch:
+                merged[k] = patch[k]
+    return sanitize_reality(merged)
+
+def public_reality(r: dict | None) -> dict:
+    """نمای عمومی Reality برای API/فرانت — privateKey هرگز خارج نمی‌شود."""
+    out = sanitize_reality(r)
+    priv = out.pop("private_key", None)
+    out["has_private_key"] = bool(priv)
+    return out
+
 def variants_from_legacy(protocol: str, fingerprint: str, alpn: str) -> dict:
     """کانفیگ‌های قدیمی که فقط یک protocol/fingerprint/alpn ستونی داشتن رو به فرمت جدید تبدیل می‌کنه."""
     auth, transport = split_protocol(protocol)
@@ -355,6 +400,11 @@ def variants_from_body(body: dict, base: dict | None = None) -> dict:
     return sanitize_variants(result)
 
 DB_FILE = "/data/panel.db" if os.path.isdir("/data") else "panel.db"
+try:
+    import reality_xray
+except Exception as _rlx_exc:  # pragma: no cover
+    reality_xray = None
+    logger.warning(f"[REALITY] gateway module unavailable ({_rlx_exc}) — Reality disabled")
 if os.path.isdir("/data"):
     logger.warning(f"[STARTUP] Persistent volume detected at /data -> using {DB_FILE} (data survives restarts/deploys)")
 else:
@@ -624,6 +674,7 @@ def init_db():
         ("alpn", "ALTER TABLE links ADD COLUMN alpn TEXT DEFAULT ''"),
         ("port", "ALTER TABLE links ADD COLUMN port INTEGER DEFAULT 443"),
         ("variants_json", "ALTER TABLE links ADD COLUMN variants_json TEXT DEFAULT ''"),
+        ("reality_json", "ALTER TABLE links ADD COLUMN reality_json TEXT DEFAULT ''"),
     ):
         if col not in existing_cols:
             conn.execute(ddl)
@@ -699,14 +750,15 @@ async def save_db():
                 for uid, link in list(LINKS.items()):
                     variants = sanitize_variants(link.get("variants"))
                     legacy_protocol, legacy_fp, legacy_alpn = variants_to_legacy(variants)
+                    reality_s = json.dumps(sanitize_reality(link.get("reality")))
                     conn.execute("""
-                        INSERT OR REPLACE INTO links (uuid, label, limit_bytes, used_bytes, max_connections, created_at, active, expires_at, protocol, fingerprint, alpn, port, variants_json)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        INSERT OR REPLACE INTO links (uuid, label, limit_bytes, used_bytes, max_connections, created_at, active, expires_at, protocol, fingerprint, alpn, port, variants_json, reality_json)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """, (uid, link["label"], link["limit_bytes"], link["used_bytes"],
                           link.get("max_connections", 0), link["created_at"],
                           1 if link.get("active", True) else 0, link.get("expires_at"),
                           legacy_protocol, legacy_fp, legacy_alpn, link.get("port", DEFAULT_PORT),
-                          json.dumps(variants)))
+                          json.dumps(variants), reality_s))
             # Save addresses
             async with CUSTOM_ADDRESSES_LOCK:
                 conn.execute("DELETE FROM custom_addresses")
@@ -754,6 +806,11 @@ def load_db():
                 "variants": variants,
                 "port": row["port"] if row["port"] else DEFAULT_PORT,
             }
+            if "reality_json" in row.keys() and row["reality_json"]:
+                try:
+                    LINKS[row["uuid"]]["reality"] = sanitize_reality(json.loads(row["reality_json"]))
+                except Exception:
+                    pass
         # Load addresses
         CUSTOM_ADDRESSES.clear()
         cur = conn.execute("SELECT address FROM custom_addresses")
@@ -855,6 +912,9 @@ async def startup():
     await restart_telegram_bot()
     asyncio.create_task(telegram_notifier_cron())
     await ensure_default_link()
+    if reality_xray is not None:
+        # بوت غیربلوکه‌کنندهٔ هستهٔ Reality: دانلود/نصب Xray و بالاآوردن listener ها
+        asyncio.create_task(reality_xray.sync_all())
 
 @app.on_event("shutdown")
 async def shutdown():
@@ -862,6 +922,11 @@ async def shutdown():
     await clear_expired_sessions()
     if http_client:
         await http_client.aclose()
+    if reality_xray is not None:
+        try:
+            await reality_xray.shutdown()
+        except Exception:
+            pass
 
 def get_domain() -> str:
     return (
@@ -877,6 +942,7 @@ def generate_vless_link(
     protocol: str = DEFAULT_PROTOCOL,
     fingerprint: str | None = None,
     alpn: str | None = None,
+    reality: dict | None = None,
 ) -> str:
     """می‌سازد share-link متناسب با auth (vless/trojan) و ترابرد انتخاب‌شده
     (ws یا یکی از دو مد XHTTP: packet-up / stream-up). fingerprint/alpn در
@@ -903,6 +969,35 @@ def generate_vless_link(
 
     # پورت ثابت و همیشه 443 — هر مقدار ورودی نادیده گرفته می‌شه
     use_port = DEFAULT_PORT
+
+    # REALITY: وقتی اینباند Reality برای این لینک فعال باشه، یک share-link واقعی
+    # vless + XHTTP + REALITY ساخته می‌شه که به پورت اختصاصی همون inbound وصل می‌شه؛
+    # کلید عمومی/short-id از خود Xray میاد و sni همون هاستی هست که کاربر انتخاب کرده.
+    r_cfg = sanitize_reality(reality)
+    use_reality = (
+        auth == "vless"
+        and r_cfg.get("enabled") and r_cfg.get("sni")
+        and r_cfg.get("public_key") and r_cfg.get("short_id")
+        and 1 <= int(r_cfg.get("port") or 0) <= 65535
+    )
+    if use_reality:
+        use_port = r_cfg["port"]
+        mode = "stream-up" if transport == "xhttp-stream-up" else "packet-up"
+        params = {
+            "encryption": "none",
+            "security": "reality",
+            "type": "xhttp",
+            "mode": mode,
+            "host": r_cfg["sni"],
+            "path": f"/{uuid[:8]}",
+            "sni": r_cfg["sni"],
+            "fp": fp if fp in FINGERPRINTS else DEFAULT_FINGERPRINT,
+            "pbk": r_cfg["public_key"],
+            "sid": r_cfg["short_id"],
+            "spx": "/",
+        }
+        query = "&".join(f"{k}={quote(str(v))}" for k, v in params.items())
+        return f"vless://{uuid}@{addr}:{use_port}?{query}#{quote(remark)}"
 
     if transport == "ws":
         path = f"/ws/{auth}/{uuid}?ed=2048"
@@ -959,6 +1054,28 @@ def link_for_variant(link: dict, uid: str, auth: str, address: str = None, inclu
         alpn=variant.get("alpn"),
     )
 
+def reality_link_for_link(link: dict, uid: str, address: str = None) -> str | None:
+    """اگه REALITY روی این لینک فعال و کلیدهاش آماده باشه، share-link واقعی
+    VLESS + XHTTP + REALITY رو برمی‌گردونه؛ در غیر این صورت None."""
+    r = link.get("reality") or {}
+    try:
+        port_ok = 1 <= int(r.get("port") or 0) <= 65535
+    except (TypeError, ValueError):
+        return None
+    if not (r.get("enabled") and r.get("sni") and r.get("public_key") and r.get("short_id") and port_ok):
+        return None
+    vv = sanitize_variants(link.get("variants")).get("vless")
+    if not vv or not vv.get("enabled"):
+        return None
+    return generate_vless_link(
+        uid,
+        remark=f"NexoVIP-{link.get('label', '')}-Reality",
+        address=address,
+        protocol="vless-xhttp-packet-up",
+        fingerprint=vv.get("fingerprint"),
+        reality=r,
+    )
+
 def links_for_all_variants(link: dict, uid: str, address: str = None, first_done: list = None) -> list[str]:
     """برای هر auth فعال روی این لینک، یک share-link می‌سازه (ممکنه ۱ یا ۲ تا خروجی بده).
     اگه first_done (یه لیست تک‌عنصری) پاس داده بشه، فقط اولین share-link کل ساب
@@ -974,6 +1091,11 @@ def links_for_all_variants(link: dict, uid: str, address: str = None, first_done
             out.append(share_link)
             if first_done is not None:
                 first_done[0] = True
+    # اگه REALITY روی این اشتراک فعال باشه، کانفیگ واقعی VLESS+XHTTP+Reality به‌عنوان
+    # یک آیتم جدا به انتهای لیست اضافه می‌شه (کنار کانفیگ‌های عادی TLS روی 443).
+    rl_link = reality_link_for_link(link, uid, address=address)
+    if rl_link:
+        out.append(rl_link)
     return out
 
 def uptime() -> str:
@@ -1875,8 +1997,10 @@ async def create_link(request: Request, _=Depends(require_auth)):
             "expires_at": expires_at,
             "variants": variants,
             "port": port,
+            "reality": sanitize_reality(body.get("reality")),
         }
     await save_db()
+    _schedule_reality_sync()
     return {
         "uuid": uid, "label": label, "limit_bytes": limit_bytes, "used_bytes": 0,
         "max_connections": max_conn, "active": True, "created_at": LINKS[uid]["created_at"],
@@ -1901,6 +2025,7 @@ async def list_links(_=Depends(require_auth)):
             "created_at": data["created_at"],
             "expires_at": data.get("expires_at"),
             "variants": sanitize_variants(data.get("variants")),
+            "reality": public_reality(data.get("reality")),
             "port": data.get("port", DEFAULT_PORT),
             "current_connections": await count_connections_for_link(uid),
             "vless_links": links_for_all_variants(data, uid),
@@ -1935,6 +2060,10 @@ async def toggle_link(uid: str, request: Request, _=Depends(require_auth)):
             LINKS[uid]["variants"] = variants_from_body(body, base=sanitize_variants(LINKS[uid].get("variants")))
         # پورت همیشه 443 است — دیگه از ورودی کاربر خونده نمی‌شه
         LINKS[uid]["port"] = DEFAULT_PORT
+        if "reality" in body:
+            # partial REALITY patch: existing Xray-generated keys are preserved;
+            # only the fields sent by the panel change
+            LINKS[uid]["reality"] = merge_reality(LINKS[uid].get("reality"), body.get("reality"))
         if "days_valid" in body:
             try:
                 dv = int(body["days_valid"])
@@ -1946,6 +2075,7 @@ async def toggle_link(uid: str, request: Request, _=Depends(require_auth)):
             except (ValueError, TypeError):
                 pass
     await save_db()
+    _schedule_reality_sync()
     return {"ok": True}
 
 @app.delete("/api/links/{uid}")
@@ -1953,7 +2083,60 @@ async def delete_link(uid: str, _=Depends(require_auth)):
     async with LINKS_LOCK:
         LINKS.pop(uid, None)
     await save_db()
+    _schedule_reality_sync()
     await close_connections_for_link(uid)
+    return {"ok": True}
+
+
+# ==========================================================================
+# REALITY gateway - real Xray-core lifecycle (keys generated by xray x25519)
+# ==========================================================================
+
+def _schedule_reality_sync():
+    """Feeds link changes to the real Xray core: generates missing keys with
+    xray x25519 itself, writes config and reloads all Reality listeners.
+    Never blocks the request."""
+    if reality_xray is None:
+        return
+
+    async def _job():
+        try:
+            await reality_xray.sync_all()
+        except Exception as exc:
+            logger.error(f"[REALITY] sync failed: {exc}")
+
+    asyncio.ensure_future(_job())
+
+@app.get("/api/reality/status")
+async def api_reality_status(_=Depends(require_auth)):
+    async with LINKS_LOCK:
+        enabled = [d.get("reality") or {} for d in LINKS.values()]
+    ready = sum(1 for r in enabled
+                if r.get("sni") and r.get("public_key") and r.get("short_id")
+                and 1 <= int(r.get("port") or 0) <= 65535)
+    st = {"available": reality_xray is not None, "inbounds_enabled": len(enabled),
+          "inbounds_ready": ready}
+    if reality_xray is not None:
+        try:
+            st.update(reality_xray.status())
+        except Exception as exc:
+            logger.error(f"[REALITY] status failed: {exc}")
+    return st
+
+@app.post("/api/reality/{uid}/rotate-keys")
+async def api_reality_rotate(uid: str, _=Depends(require_auth)):
+    async with LINKS_LOCK:
+        if uid not in LINKS:
+            raise HTTPException(status_code=404, detail="link not found")
+        r = LINKS[uid].get("reality")
+        if not r or not r.get("enabled"):
+            raise HTTPException(status_code=400, detail="Reality is not enabled for this inbound")
+        # keys cleared here; _schedule_reality_sync regenerates them via Xray
+        r["private_key"] = ""
+        r["public_key"] = ""
+        r["short_id"] = ""
+    await save_db()
+    _schedule_reality_sync()
     return {"ok": True}
 
 @app.get("/api/addresses")
@@ -4165,6 +4348,20 @@ body{background:radial-gradient(circle at 78% -8%,rgba(255,36,72,.12),transparen
       <label class="fl" data-en="Port" data-fa="پورت">Port</label>
       <input class="fi" value="443" readonly style="cursor:not-allowed">
     </div>
+    <div class="fg" style="border:1px solid var(--border);border-radius:10px;padding:10px 12px;margin-top:4px">
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
+        <input type="checkbox" id="n_rl_enabled" style="width:16px;height:16px;accent-color:var(--gold)" onchange="toggleRlBox('n')">
+        <label for="n_rl_enabled" style="font-weight:700;cursor:pointer">REALITY <span style="font-size:9px;color:var(--text3);font-weight:600">(VLESS + XHTTP)</span></label>
+      </div>
+      <div id="n_rl_box" style="display:none">
+        <div class="fr">
+          <div class="fg"><label class="fl" data-en="In Port" data-fa="پورت ورودی">In Port</label><input class="fi" id="n_rl_port" type="number" min="1" max="65535" placeholder="e.g. 8443"></div>
+          <div class="fg"><label class="fl" data-en="Out Port" data-fa="پورت خروجی">Out Port</label><input class="fi" id="n_rl_dport" type="number" min="1" max="65535" value="443"></div>
+        </div>
+        <div class="fg"><label class="fl" data-en="SNI / Host" data-fa="SNI / هاست">SNI / Host</label><input class="fi" id="n_rl_sni" data-ph-en="e.g. www.microsoft.com" data-ph-fa="مثلاً www.microsoft.com" placeholder="e.g. www.microsoft.com"></div>
+        <div id="n_rl_keys" style="display:none;font-size:10px;color:var(--text3);word-break:break-all;margin-top:6px;line-height:1.5"></div>
+      </div>
+    </div>
     <button class="btn btn-gold" onclick="createLink()" style="width:100%;justify-content:center;margin-top:12px;padding:12px" data-en="CREATE" data-fa="ایجاد">CREATE</button>
   </div>
 </div>
@@ -4252,7 +4449,21 @@ body{background:radial-gradient(circle at 78% -8%,rgba(255,36,72,.12),transparen
       <input class="fi" value="443" readonly style="cursor:not-allowed">
     </div>
     <div style="display:flex;gap:10px;margin-top:16px">
-      <button class="btn btn-gold" onclick="saveEdit()" style="flex:1;justify-content:center;padding:12px" data-en="SAVE" data-fa="ذخیره">SAVE</button>
+      <div class="fg" style="border:1px solid var(--border);border-radius:10px;padding:10px 12px;margin-top:4px">
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
+        <input type="checkbox" id="e_rl_enabled" style="width:16px;height:16px;accent-color:var(--gold)" onchange="toggleRlBox('e')">
+        <label for="e_rl_enabled" style="font-weight:700;cursor:pointer">REALITY <span style="font-size:9px;color:var(--text3);font-weight:600">(VLESS + XHTTP)</span></label>
+      </div>
+      <div id="e_rl_box" style="display:none">
+        <div class="fr">
+          <div class="fg"><label class="fl" data-en="In Port" data-fa="پورت ورودی">In Port</label><input class="fi" id="e_rl_port" type="number" min="1" max="65535" placeholder="e.g. 8443"></div>
+          <div class="fg"><label class="fl" data-en="Out Port" data-fa="پورت خروجی">Out Port</label><input class="fi" id="e_rl_dport" type="number" min="1" max="65535" value="443"></div>
+        </div>
+        <div class="fg"><label class="fl" data-en="SNI / Host" data-fa="SNI / هاست">SNI / Host</label><input class="fi" id="e_rl_sni" data-ph-en="e.g. www.microsoft.com" data-ph-fa="مثلاً www.microsoft.com" placeholder="e.g. www.microsoft.com"></div>
+        <div id="e_rl_keys" style="display:none;font-size:10px;color:var(--text3);word-break:break-all;margin-top:6px;line-height:1.5"></div>
+      </div>
+    </div>
+    <button class="btn btn-gold" onclick="saveEdit()" style="flex:1;justify-content:center;padding:12px" data-en="SAVE" data-fa="ذخیره">SAVE</button>
       <button class="btn btn-danger" onclick="resetTraf()" style="padding:12px" data-en="Reset" data-fa="بازنشانی">Reset</button>
     </div>
   </div>
@@ -4534,7 +4745,7 @@ function renderLinks(links){
 
   tb.innerHTML=rows.map(r=>`<tr>
     <td style="color:var(--text3);font-size:10.5px">${r.i}</td>
-    <td style="font-weight:600">${esc(r.l.label)}</td>
+    <td style="font-weight:600">${esc(r.l.label)}${r.l.reality&&r.l.reality.enabled?'<span class="tag" style="background:rgba(239,42,58,.14);color:#ff5a63;border-color:rgba(239,42,58,.45);margin-inline-start:6px;font-size:9px">REALITY</span>':''}</td>
     <td><span class="tag tag-vless">${protoBadge(r.l.variants)}</span></td>
     <td><div class="pill"><span class="pill-used">${fmtB(r.u)}</span><div class="pill-bar"><div class="pill-fill" style="width:${r.pct}%;background:${r.col}"></div></div><span class="pill-lim">${fmtLim(r.lim)}</span></div></td>
     <td style="font-size:11px;font-weight:600;color:${r.mc2>0&&r.cc>=r.mc2?'var(--red)':'var(--text2)'}">${r.cc}/${r.mc2||'∞'}</td>
@@ -4599,6 +4810,37 @@ function syncAlpnDefault(auth,transportId,alpnId){
 function toggleVariantBox(prefix,auth){
   $m(prefix+'_'+auth+'_box').style.display=$m(prefix+'_'+auth+'_enabled').checked?'':'none';
 }
+// ── REALITY fields ─────────────────────────────────────────────────────
+const RL_SNI_RE=/^[a-zA-Z0-9\-_.]+$/;
+function toggleRlBox(p){
+  $m(p+'_rl_box').style.display=$m(p+'_rl_enabled').checked?'':'none';
+}
+function readRealityFields(p){
+  return{
+    enabled:$m(p+'_rl_enabled').checked,
+    sni:($m(p+'_rl_sni').value||'').trim(),
+    port:parseInt($m(p+'_rl_port').value)||0,
+    dest_port:parseInt($m(p+'_rl_dport').value)||443,
+  };
+}
+function validReality(rl){
+  return rl.enabled && RL_SNI_RE.test(rl.sni) && rl.port>=1 && rl.port<=65535 && rl.dest_port>=1 && rl.dest_port<=65535;
+}
+function fillRealityFields(p,r){
+  r=r||{};
+  $m(p+'_rl_enabled').checked=!!r.enabled;
+  $m(p+'_rl_sni').value=r.sni||'';
+  $m(p+'_rl_port').value=r.port>0?r.port:'';
+  $m(p+'_rl_dport').value=r.dest_port>0?r.dest_port:443;
+  toggleRlBox(p);
+  const keys=$m(p+'_rl_keys');
+  if(keys){
+    if(r.public_key){
+      keys.style.display='';
+      keys.innerHTML='<b>🔑 '+esc(r.public_key)+'</b>'+(r.short_id?(' &nbsp;·&nbsp; 🆔 '+esc(r.short_id)):'');
+    }else{keys.style.display='none';keys.textContent='';}
+  }
+}
 function readVariantFields(prefix,auth){
   return {
     [auth+'_enabled']: $m(prefix+'_'+auth+'_enabled').checked,
@@ -4622,7 +4864,9 @@ async function createLink(){
   const v=parseFloat($m('nv').value)||0;
   const mc=parseInt($m('nc').value)||0;
   const days=parseInt($m('nd').value)||0;
-  const body=Object.assign({label,limit_value:v,limit_unit:'GB',max_connections:mc,days_valid:days},readVariantFields('n','vless'),readVariantFields('n','trojan'));
+  const rl=readRealityFields('n');
+  if(rl.enabled&&!validReality(rl)){toast(lang==='fa'?'REALITY: هاست SNI معتبر و پورت ورودی لازم است':'REALITY: enter a valid SNI host and In-Port',true);return}
+  const body=Object.assign({label,limit_value:v,limit_unit:'GB',max_connections:mc,days_valid:days},readVariantFields('n','vless'),readVariantFields('n','trojan'),{reality:rl});
   try{
     const r=await fetch('/api/links',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
     if(!r.ok)throw new Error();
@@ -4644,6 +4888,7 @@ function showEditMo(uid){
   const variants=l.variants||{};
   fillVariantFields('e','vless',variants.vless);
   fillVariantFields('e','trojan',variants.trojan);
+  fillRealityFields('e',l.reality);
   $m('et').textContent=(lang==='fa'?'ویرایش: ':'EDIT: ')+l.label;
   $m('mo-edit').classList.add('show');
 }
@@ -4654,7 +4899,9 @@ async function saveEdit(){
   const v=parseFloat($m('el').value)||0;
   const mc=parseInt($m('ec').value)||0;
   const days=parseInt($m('ed').value)||0;
-  const body=Object.assign({limit_value:v,limit_unit:'GB',max_connections:mc},readVariantFields('e','vless'),readVariantFields('e','trojan'));
+  const rl=readRealityFields('e');
+  if(rl.enabled&&!validReality(rl)){toast(lang==='fa'?'REALITY: هاست SNI معتبر و پورت ورودی لازم است':'REALITY: enter a valid SNI host and In-Port',true);return}
+  const body=Object.assign({limit_value:v,limit_unit:'GB',max_connections:mc},readVariantFields('e','vless'),readVariantFields('e','trojan'),{reality:rl});
   if(days>0)body.days_valid=days;
   try{
     const r=await fetch('/api/links/'+uid,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
