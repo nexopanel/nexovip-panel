@@ -2339,7 +2339,7 @@ def generate_landing_page(link: dict, uid: str, addresses: list[str]) -> str:
         .mo.show{{display:flex}}
         .mo-box{{background:var(--surface2);border:1px solid var(--border2);border-radius:20px;
             padding:24px;width:90%;max-width:300px;text-align:center;position:relative;
-            box-shadow:var(--gold-glow),inset 0 1px 0 rgba(255,255,255,.035)}}
+            box-shadow:var(--gold-glow)}}
         .mo-box img{{max-width:200px;border-radius:8px;border:3px solid var(--border);margin:12px 0}}
         .mo-close{{position:absolute;top:12px;right:12px;background:var(--surface2);
             border:1px solid var(--border);color:var(--text3);width:28px;height:28px;
@@ -2351,7 +2351,7 @@ def generate_landing_page(link: dict, uid: str, addresses: list[str]) -> str:
             background:var(--bg2);color:var(--gold);border:1px solid var(--border2);
             border-radius:10px;padding:10px 18px;font-size:13px;font-weight:600;
             opacity:0;transition:all .3s;z-index:999;backdrop-filter:blur(20px);
-            box-shadow:var(--gold-glow),inset 0 1px 0 rgba(255,255,255,.035)}}
+            box-shadow:var(--gold-glow)}}
         .toast.show{{opacity:1;transform:translateX(-50%) translateY(0)}}
 
         /* NexoVIP footer links */
@@ -5040,8 +5040,8 @@ function startPolling(){
 startPolling();
 
 // ── Panel update notifications (checks GitHub for new releases) ────────
-const PANEL_VERSION_KEY='nexovip_panel_last_version';
-const PANEL_GH_NOTIFIED_KEY='nexovip_panel_last_notified_gh';
+const PANEL_VERSION_KEY='luffy_panel_last_version';
+const PANEL_GH_NOTIFIED_KEY='luffy_panel_last_notified_gh';
 let loadedPanelVersion=null;
 
 async function checkPanelVersion(isPeriodic){
