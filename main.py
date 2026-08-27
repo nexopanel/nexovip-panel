@@ -3569,6 +3569,77 @@ body[dir="rtl"]{direction:rtl;text-align:right}
 .toggle.on::after{left:17px;background:#fff}
 .sys-bar{height:6px;background:var(--border);border-radius:3px;overflow:hidden}
 .sys-fill{height:100%;border-radius:3px;transition:width .4s}
+
+/* ═══ Premium Dashboard ═══ */
+.stat-card.premium{padding:16px 16px 14px;display:flex;flex-direction:column;overflow:hidden}
+.stat-card.premium::after{content:'';position:absolute;top:-40%;inset-inline-end:-15%;width:130px;height:130px;
+  background:radial-gradient(circle,rgba(255,48,72,.13),transparent 70%);pointer-events:none;transition:opacity .3s}
+.stat-card.premium:hover::after{opacity:1.4}
+.stat-top{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px}
+.stat-ic{width:34px;height:34px;border-radius:10px;display:flex;align-items:center;justify-content:center;
+  background:var(--gold-dim);border:1px solid var(--border);color:var(--gold2);flex-shrink:0}
+.stat-ic svg{width:16px;height:16px}
+.stat-trend{font-size:9px;font-weight:800;letter-spacing:.12em;color:var(--text3);
+  display:flex;align-items:center;gap:5px;padding:4px 8px;border-radius:999px;
+  background:rgba(255,255,255,.03);border:1px solid var(--border)}
+.conn-trend{color:var(--green);border-color:rgba(73,229,141,.22)}
+.live-dot{width:7px;height:7px;border-radius:50%;background:var(--green);flex-shrink:0;
+  box-shadow:0 0 8px var(--green);animation:pulseDot 1.6s ease-in-out infinite}
+.dot-red{background:var(--gold2);box-shadow:0 0 8px rgba(255,48,72,.7)}
+@keyframes pulseDot{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.35;transform:scale(.82)}}
+.dash-live-pill{display:flex;align-items:center;gap:8px;padding:8px 15px;border-radius:999px;
+  background:var(--surface2);border:1px solid var(--border2);font-size:11px;font-weight:800;
+  letter-spacing:.16em;color:var(--gold2);box-shadow:var(--gold-glow);white-space:nowrap}
+.sys-card{display:flex;flex-direction:column}
+.sys-chip{font-size:9.5px;font-weight:800;letter-spacing:.12em;padding:5px 11px;border-radius:999px;
+  background:var(--green-dim);color:var(--green);border:1px solid rgba(73,229,141,.28);white-space:nowrap;
+  transition:all .3s}
+.sys-chip.warn{background:var(--red-dim);color:var(--red);border-color:rgba(255,82,104,.32);
+  animation:pulseDot 1.4s ease-in-out infinite}
+.sys-metric{margin-bottom:16px}
+.sys-metric:last-of-type{margin-bottom:0}
+.sys-metric-hd{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:8px}
+.sys-metric-name{font-size:10px;font-weight:800;letter-spacing:.1em;color:var(--text3);text-transform:uppercase}
+.sys-metric-val{font-size:16px;font-weight:800;letter-spacing:-.02em}
+.sys-bar-xl{height:8px;border-radius:4px;background:rgba(255,48,72,.08);overflow:hidden;
+  border:1px solid rgba(255,48,72,.1)}
+.sys-fill-xl{height:100%;border-radius:4px;width:0%;position:relative;overflow:hidden;
+  transition:width .7s cubic-bezier(.4,0,.2,1),background .4s}
+.sys-fill-xl::after{content:'';position:absolute;inset:0;
+  background:linear-gradient(90deg,transparent,rgba(255,255,255,.28),transparent);
+  animation:shimmer 2.4s infinite}
+@keyframes shimmer{0%{transform:translateX(-100%)}100%{transform:translateX(100%)}}
+.sys-meta{display:flex;gap:8px;flex-wrap:wrap;margin-top:16px}
+.meta-chip{display:flex;align-items:center;gap:7px;padding:8px 12px;border-radius:9px;max-width:100%;
+  background:var(--surface3);border:1px solid var(--border);font-size:11.5px;font-weight:600;color:var(--text2)}
+.meta-chip span:last-child{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+/* Clean IP pool */
+.ip-card .card-hd{flex-wrap:wrap;gap:8px}
+.ip-title-ic{font-size:14px}
+.ip-count{min-width:22px;height:20px;padding:0 7px;border-radius:999px;background:var(--gold-dim);
+  color:var(--gold2);font-size:11px;font-weight:800;display:inline-flex;align-items:center;
+  justify-content:center;margin-inline-start:4px}
+.ip-actions{display:flex;gap:6px;flex-wrap:wrap}
+.ip-scroll{display:flex;flex-wrap:wrap;gap:8px;max-height:150px;overflow-y:auto;padding:2px}
+.ip-chip{display:inline-flex;align-items:center;gap:8px;padding:8px 13px;border-radius:9px;cursor:pointer;
+  background:var(--surface3);border:1px solid var(--border);transition:all .2s;
+  font-family:ui-monospace,'Cascadia Mono','Consolas',monospace;font-size:12px;color:var(--text)}
+.ip-chip:hover{border-color:var(--border2);box-shadow:var(--gold-glow);transform:translateY(-1px)}
+.ip-chip:active{transform:translateY(0)}
+.ip-dot{width:6px;height:6px;border-radius:50%;background:var(--green);flex-shrink:0;
+  box-shadow:0 0 6px rgba(73,229,141,.65)}
+.ip-empty{width:100%;text-align:center;padding:22px;color:var(--text3);font-size:12px;
+  border:1px dashed var(--border);border-radius:12px}
+.ip-footer{margin-top:12px;padding-top:11px;border-top:1px solid var(--border);cursor:pointer;
+  font-size:11.5px;font-weight:700;color:var(--gold2);display:flex;align-items:center;gap:5px;transition:gap .2s}
+.ip-footer:hover{gap:10px}
+@media(max-width:768px){
+  .dash-live-pill{padding:6px 12px;font-size:10px}
+  .stat-card.premium{padding:18px 18px 16px}
+  .sys-metric-val{font-size:18px}
+  .ip-scroll{max-height:190px}
+  .ip-footer span:last-child{margin-inline-start:auto}
+}
 .sl-item{display:flex;align-items:center;justify-content:space-between;padding:10px 0;border-bottom:1px solid var(--border)}
 .sl-k{color:var(--text3);font-size:11.5px}
 .sl-v{color:var(--text);font-weight:600;font-size:11.5px}
@@ -3886,6 +3957,7 @@ body{background:radial-gradient(circle at 78% -8%,rgba(255,36,72,.12),transparen
           <div class="page-title" data-en="Dashboard" data-fa="داشبورد">Dashboard</div>
           <div class="page-sub" id="last-up">-</div>
         </div>
+        <div class="dash-live-pill"><span class="live-dot"></span><span data-en="LIVE" data-fa="زنده">LIVE</span></div>
       </div>
 
       <div class="alerts-box" id="alerts-box">
@@ -3896,25 +3968,63 @@ body{background:radial-gradient(circle at 78% -8%,rgba(255,36,72,.12),transparen
         <div id="alerts-list"></div>
       </div>
 
-      <div class="stats-row">
-        <div class="stat-card" style="animation-delay:.08s"><div class="stat-label" data-en="Traffic" data-fa="ترافیک">Traffic</div><div class="stat-val" id="sv-traffic">-<span class="stat-unit"> MB</span></div></div>
-        <div class="stat-card" style="animation-delay:.16s"><div class="stat-label" data-en="Inbounds" data-fa="اینباندها">Inbounds</div><div class="stat-val" id="sv-links">-</div></div>
-        <div class="stat-card" style="animation-delay:.24s"><div class="stat-label" data-en="Uptime" data-fa="آپتایم">Uptime</div><div class="stat-val" id="sv-uptime" style="font-size:15px">-</div></div>
-        <div class="stat-card" style="animation-delay:.32s"><div class="stat-label" data-en="Domain" data-fa="دامنه">Domain</div><div class="stat-val" id="sv-domain" style="font-size:10px;word-break:break-all;font-weight:500">-</div></div>
+      <div class="stats-row dash-stats">
+        <div class="stat-card premium" style="animation-delay:.05s">
+          <div class="stat-top"><span class="stat-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg></span><span class="stat-trend"><span class="live-dot"></span><span data-en="LIVE" data-fa="زنده">LIVE</span></span></div>
+          <div class="stat-label" data-en="Total Traffic" data-fa="کل ترافیک">Total Traffic</div>
+          <div class="stat-val" id="sv-traffic">-<span class="stat-unit"> MB</span></div>
+        </div>
+        <div class="stat-card premium" style="animation-delay:.13s">
+          <div class="stat-top"><span class="stat-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="2" width="20" height="8" rx="2"/><rect x="2" y="14" width="20" height="8" rx="2"/><line x1="6" y1="6" x2="6.01" y2="6"/><line x1="6" y1="18" x2="6.01" y2="18"/></svg></span></div>
+          <div class="stat-label" data-en="Inbounds" data-fa="اینباندها">Inbounds</div>
+          <div class="stat-val" id="sv-links">-</div>
+        </div>
+        <div class="stat-card premium" style="animation-delay:.21s">
+          <div class="stat-top"><span class="stat-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg></span><span class="stat-trend conn-trend"><span class="live-dot dot-red"></span><span data-en="ONLINE" data-fa="آنلاین">ONLINE</span></span></div>
+          <div class="stat-label" data-en="Active Connections" data-fa="اتصال‌های فعال">Active Connections</div>
+          <div class="stat-val" id="sv-conn">-</div>
+        </div>
+        <div class="stat-card premium" style="animation-delay:.29s">
+          <div class="stat-top"><span class="stat-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 014 10 15.3 15.3 0 01-4 10 15.3 15.3 0 01-4-10 15.3 15.3 0 014-10z"/></svg></span></div>
+          <div class="stat-label" data-en="Total Requests" data-fa="کل درخواست‌ها">Total Requests</div>
+          <div class="stat-val" id="sv-req">-</div>
+        </div>
       </div>
       <div class="grid-2">
-        <div class="card">
-          <div class="card-hd"><div class="card-title" data-en="CPU" data-fa="پردازنده">CPU</div><span id="cpu-v" style="font-size:17px;font-weight:700;color:var(--gold)">-%</span></div>
-          <div class="sys-bar"><div class="sys-fill" id="cpu-b" style="background:var(--gold)"></div></div>
+        <div class="card sys-card">
+          <div class="card-hd">
+            <div class="card-title" data-en="System Health" data-fa="وضعیت سیستم">System Health</div>
+            <span class="sys-chip" id="sys-st" data-en="HEALTHY" data-fa="سالم">HEALTHY</span>
+          </div>
+          <div class="sys-metric">
+            <div class="sys-metric-hd"><span class="sys-metric-name" data-en="CPU" data-fa="پردازنده">CPU</span><span class="sys-metric-val" id="cpu-v">-%</span></div>
+            <div class="sys-bar-xl"><div class="sys-fill-xl" id="cpu-b"></div></div>
+          </div>
+          <div class="sys-metric">
+            <div class="sys-metric-hd"><span class="sys-metric-name" data-en="Memory" data-fa="حافظه">Memory</span><span class="sys-metric-val" id="mem-v">-%</span></div>
+            <div class="sys-bar-xl"><div class="sys-fill-xl" id="mem-b"></div></div>
+          </div>
+          <div class="sys-meta">
+            <div class="meta-chip"><span>⏱</span><span id="sv-uptime">-</span></div>
+            <div class="meta-chip"><span>🌐</span><span id="sv-domain">-</span></div>
+          </div>
         </div>
         <div class="card">
-          <div class="card-hd"><div class="card-title" data-en="Memory" data-fa="حافظه">Memory</div><span id="mem-v" style="font-size:17px;font-weight:700;color:var(--green)">-%</span></div>
-          <div class="sys-bar"><div class="sys-fill" id="mem-b" style="background:var(--green)"></div></div>
+          <div class="card-hd"><div class="card-title" data-en="Hourly Traffic" data-fa="ترافیک ساعتی">Hourly Traffic</div></div>
+          <div class="chart-container"><canvas id="tc"></canvas></div>
         </div>
       </div>
-      <div class="card">
-        <div class="card-hd"><div class="card-title" data-en="Hourly Traffic" data-fa="ترافیک ساعتی">Hourly Traffic</div></div>
-        <div class="chart-container"><canvas id="tc"></canvas></div>
+      <div class="card ip-card">
+        <div class="card-hd">
+          <div class="card-title"><span class="ip-title-ic">🌐</span><span data-en="Clean IP Pool" data-fa="استخر آی‌پی تمیز">Clean IP Pool</span><span class="ip-count" id="dash-ip-count">0</span></div>
+          <div class="ip-actions">
+            <button class="btn btn-ghost btn-sm" onclick="copyAllIPs()" data-en="⧉ Copy All" data-fa="⧉ کپی همه">⧉ Copy All</button>
+            <button class="btn btn-ghost btn-sm" onclick="importAddrs('railway')" data-en="🚄 Railway" data-fa="🚄 ریلوی">🚄 Railway</button>
+            <button class="btn btn-gold btn-sm" onclick="showAddAddrMo()" data-en="+ Add IP" data-fa="+ افزودن">+ Add IP</button>
+          </div>
+        </div>
+        <div class="ip-scroll" id="dash-ip-list"></div>
+        <div class="ip-footer" onclick="switchPage('addresses')"><span data-en="Manage all IPs" data-fa="مدیریت همه آی‌پی‌ها">Manage all IPs</span><span>→</span></div>
       </div>
     </section>
 
@@ -4838,6 +4948,8 @@ async function loadStats(){
     sData=await r.json();
     $m('sv-traffic').innerHTML=(sData.total_traffic_mb||0)+'<span class="stat-unit"> MB</span>';
     $m('sv-links').textContent=sData.links_count||0;
+    if($m('sv-conn'))$m('sv-conn').textContent=(sData.active_connections!=null?sData.active_connections:0);
+    if($m('sv-req'))$m('sv-req').textContent=(sData.total_requests||0).toLocaleString();
     $m('sv-uptime').textContent=sData.uptime||'-';
     $m('sv-domain').textContent=sData.domain||'-';
     $m('nb').textContent=sData.links_count||0;
@@ -4847,15 +4959,20 @@ async function loadStats(){
     if($m('t-up'))$m('t-up').textContent=sData.uptime||'-';
     if(sData.cpu_percent!==undefined){
       const c=sData.cpu_percent;
-      const cc=c>80?'var(--red)':c>50?'var(--yellow)':'var(--gold)';
+      const cc=c>80?'var(--red)':c>50?'var(--yellow)':'var(--gold2)';
       $m('cpu-v').textContent=c.toFixed(1)+'%';$m('cpu-v').style.color=cc;
-      $m('cpu-b').style.width=c+'%';$m('cpu-b').style.background=cc;
+      $m('cpu-b').style.width=Math.min(c,100)+'%';$m('cpu-b').style.background=cc;
     }
     if(sData.memory_percent!==undefined){
       const m=sData.memory_percent;
       const mc=m>80?'var(--red)':m>50?'var(--yellow)':'var(--green)';
       $m('mem-v').textContent=m.toFixed(1)+'%';$m('mem-v').style.color=mc;
-      $m('mem-b').style.width=m+'%';$m('mem-b').style.background=mc;
+      $m('mem-b').style.width=Math.min(m,100)+'%';$m('mem-b').style.background=mc;
+    }
+    if($m('sys-st')){
+      const bad=(sData.cpu_percent!==undefined&&sData.cpu_percent>90)||(sData.memory_percent!==undefined&&sData.memory_percent>90);
+      $m('sys-st').textContent=bad?(lang==='fa'?'فشار بالا':'HIGH LOAD'):(lang==='fa'?'سالم':'HEALTHY');
+      $m('sys-st').classList.toggle('warn',bad);
     }
     updChart();
   }catch(e){}
@@ -4933,7 +5050,7 @@ async function loadAddrs(){
   try{
     const r=await fetch('/api/addresses');
     if(!r.ok)throw new Error();
-    const d=await r.json();allAddrs=d.addresses||[];renderAddrs();
+    const d=await r.json();allAddrs=d.addresses||[];renderAddrs();renderDashIPs();
   }catch(e){}
 }
 
@@ -4948,6 +5065,26 @@ function renderAddrs(){
     </div>
     <button class="act-btn act-del" onclick="delAddr(${i})">${tr('del')}</button>
   </div>`).join('');
+}
+
+function renderDashIPs(){
+  const el=$m('dash-ip-list');
+  if(!el)return;
+  const cnt=$m('dash-ip-count');
+  if(cnt)cnt.textContent=(allAddrs||[]).length;
+  if(!allAddrs||!allAddrs.length){
+    el.innerHTML='<div class="ip-empty">'+(lang==='fa'?'هنوز آی‌پی تمیزی اضافه نشده — از دکمه‌های بالا اضافه کن یا ایمپورت کن':'No clean IPs yet — add or import with the buttons above')+'</div>';
+    return;
+  }
+  el.innerHTML=allAddrs.map(a=>'<div class="ip-chip" data-v="'+esc(a)+'" onclick="cpLink(this.dataset.v)" title="Click to copy"><span class="ip-dot"></span>'+esc(a)+'</div>').join('');
+}
+
+async function copyAllIPs(){
+  if(!allAddrs||!allAddrs.length){toast('No IPs to copy',true);return}
+  try{
+    await navigator.clipboard.writeText(allAddrs.join('\n'));
+    toast((lang==='fa'?'همه آی‌پی‌ها کپی شد':'All IPs copied!'));
+  }catch(e){toast('Failed to copy',true)}
 }
 
 function showAddAddrMo(){$m('na').value='';$m('mo-addr').classList.add('show')}
